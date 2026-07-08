@@ -261,8 +261,8 @@
     <div class="panel-title">新增持股</div>
     <div class="form-grid">
       <div class="field">
-        <label for="inSymbol">代碼</label>
-        <input type="text" id="inSymbol" placeholder="例如 2330.TW 或 AAPL" autocomplete="off">
+        <label for="inSymbol">代碼或名稱</label>
+        <input type="text" id="inSymbol" placeholder="例如 2330.TW 或 海韻電" autocomplete="off">
       </div>
       <div class="field">
         <label for="inQty">數量</label>
@@ -321,88 +321,60 @@
   const TW_BUY_FEE = 0.001425;
   const TW_SELL_FEE = 0.001425;
   const TW_TAX = 0.003;
-  const TW_MIN_FEE = 20; // 台股券商常見最低手續費（新台幣）
+  const TW_MIN_FEE = 20;
 
-  // 常見台股個股與 ETF 中文名稱 → 代碼對照，供離線快速比對（未收錄的名稱會在加入時自動連線查詢）
+  // 初始內建對照表（稍後會由官方 API 自動擴充）
   const TW_NAME_MAP = {
     "台積電": "2330.TW", "台积电": "2330.TW",
     "鴻海": "2317.TW", "鸿海": "2317.TW",
     "聯發科": "2454.TW", "联发科": "2454.TW",
     "台達電": "2308.TW", "台达电": "2308.TW",
     "中華電": "2412.TW", "中华电": "2412.TW",
-    "國泰金": "2882.TW", "国泰金": "2882.TW",
-    "富邦金": "2881.TW",
-    "中信金": "2891.TW",
-    "台塑": "1301.TW",
-    "南亞": "1303.TW", "南亚": "1303.TW",
-    "台化": "1326.TW",
-    "大立光": "3008.TW",
-    "統一": "1216.TW", "统一": "1216.TW",
-    "中鋼": "2002.TW", "中钢": "2002.TW",
-    "兆豐金": "2886.TW", "兆丰金": "2886.TW",
-    "玉山金": "2884.TW",
-    "台新金": "2887.TW",
-    "第一金": "2892.TW",
-    "合庫金": "5880.TW",
-    "永豐金": "2890.TW",
-    "華南金": "2880.TW",
-    "開發金": "2883.TW",
-    "新光金": "2888.TW",
-    "元大金": "2885.TW",
-    "台灣大": "3045.TW",
-    "遠傳": "4904.TW",
-    "廣達": "2382.TW",
-    "緯創": "3231.TW",
-    "和碩": "4938.TW",
-    "仁寶": "2324.TW",
-    "英業達": "2356.TW",
-    "技嘉": "2376.TW",
-    "微星": "2377.TW",
-    "華碩": "2357.TW",
-    "宏碁": "2353.TW",
-    "研華": "2395.TW",
-    "台灣化學纖維": "1326.TW",
-    "日月光投控": "3711.TW",
-    "聯電": "2303.TW", "联电": "2303.TW",
-    "群創": "3481.TW",
-    "友達": "2409.TW",
-    "長榮": "2603.TW",
-    "陽明": "2609.TW",
-    "萬海": "2615.TW",
-    "中鴻": "2014.TW",
-    "南亞科": "2408.TW",
-    "京元電子": "2449.TW",
-    "旺宏": "2337.TW",
-    "世芯-KY": "3661.TW",
-    "創見": "2451.TW",
-    "上緯投控": "3708.TW",
-    "元大台灣50": "0050.TW", "元大台湾50": "0050.TW",
-    "元大台灣50反1": "00632R.TW",
+    "元大台灣50": "0050.TW",
     "元大高股息": "0056.TW",
     "國泰永續高股息": "00878.TW",
-    "富邦台50": "006208.TW",
-    "復華台灣科技優息": "00929.TW",
-    "群益台灣精選高息": "00919.TW",
-    "元大台灣high dividend低波動": "00713.TW",
-    "國泰台灣科技龍頭": "00881.TW",
-    "富邦公司治理": "00692.TW",
-    "元大MSCI台灣": "006203.TW",
-    "永豐台灣加權": "006204.TW",
-    "中信中國高股息": "00882.TW",
-    "元大美債20年": "00679B.TW",
-    "國泰20年美債": "00687B.TW",
-    "凱基優選高股息30": "00915.TW",
-    "野村台灣趨勢": "00668.TW",
-    "元大電子": "0053.TW",
-    "富邦科技": "0052.TW"
+    "富邦台50": "006208.TW"
   };
 
-  // 名稱正規化：統一「臺／台」異體字、去除全形/半形空白，避免因輸入法選字差異導致比對不到
+  const TW_NAME_MAP_NORM = {};
+  
   function normalizeName(s) {
     return (s || "").trim().replace(/臺/g, "台").replace(/\s+/g, "");
   }
-  const TW_NAME_MAP_NORM = {};
+
+  // 初始化正規化對照表
   Object.keys(TW_NAME_MAP).forEach(k => { TW_NAME_MAP_NORM[normalizeName(k)] = TW_NAME_MAP[k]; });
+
+  // 背景非同步載入官方上市櫃股票清單，大幅擴充本地對照表
+  async function loadOfficialTaiwanStocks() {
+    try {
+      // 抓取證交所(上市) OpenAPI
+      const twseRes = await fetch("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL");
+      if (twseRes.ok) {
+        const data = await twseRes.json();
+        data.forEach(item => {
+          if (item.Code && item.Name) TW_NAME_MAP_NORM[normalizeName(item.Name)] = item.Code + ".TW";
+        });
+      }
+    } catch (e) {
+      console.warn("載入證交所 API 失敗，將依賴原有對照表", e);
+    }
+
+    try {
+      // 抓取櫃買中心(上櫃) OpenAPI
+      const tpexRes = await fetch("https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O");
+      if (tpexRes.ok) {
+        const data = await tpexRes.json();
+        data.forEach(item => {
+          if (item.SecuritiesCompanyCode && item.CompanyName) {
+            TW_NAME_MAP_NORM[normalizeName(item.CompanyName)] = item.SecuritiesCompanyCode + ".TWO";
+          }
+        });
+      }
+    } catch (e) {
+      console.warn("載入櫃買中心 API 失敗，將依賴原有對照表", e);
+    }
+  }
 
   function lookupNameMap(raw) {
     return TW_NAME_MAP_NORM[normalizeName(raw)] || null;
@@ -412,7 +384,7 @@
     const trimmed = raw.trim();
     const mapped = lookupNameMap(trimmed);
     if (mapped) return mapped;
-    if (/^\d{4,6}[A-Z]?$/.test(trimmed)) return trimmed + ".TW"; // 純數字（或數字+一碼字母，如可轉債）視為台股代碼，自動補 .TW
+    if (/^\d{4,6}[A-Z]?$/.test(trimmed)) return trimmed + ".TW"; 
     return trimmed.toUpperCase();
   }
 
@@ -420,7 +392,6 @@
     return /[\u3400-\u9FFF]/.test(str);
   }
 
-  // 多組公開 CORS 代理，依序嘗試，其中一組失效時自動改用下一組，提升在 GitHub Pages 上的穩定度
   const CORS_PROXIES = [
     (u) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
     (u) => "https://corsproxy.io/?url=" + encodeURIComponent(u),
@@ -428,49 +399,41 @@
   ];
 
   async function proxyFetchJson(targetUrl) {
-    let lastErr = new Error("no proxy attempted");
+    let lastErr = new Error("PROXY_FAILED"); // 明確定義代理失敗的錯誤類型
     for (const buildProxyUrl of CORS_PROXIES) {
       try {
         const res = await fetch(buildProxyUrl(targetUrl), { cache: "no-store" });
-        if (!res.ok) { lastErr = new Error("HTTP " + res.status); continue; }
+        if (!res.ok) continue;
         const data = await res.json();
         return data;
       } catch (e) {
-        lastErr = e;
-        continue;
+        continue; // 嘗試下一個代理
       }
     }
-    throw lastErr;
+    throw lastErr; // 全部失敗才丟出
   }
 
-  // 透過 Yahoo Finance 搜尋 API，將任意中文名稱（包含未收錄於內建對照表的個股或 ETF）解析成代碼
   async function searchSymbolByName(query) {
     const searchUrl = "https://query1.finance.yahoo.com/v1/finance/search?q=" + encodeURIComponent(query) + "&quotesCount=8&newsCount=0&lang=zh-TW&region=TW";
     const data = await proxyFetchJson(searchUrl);
     const quotes = (data && data.quotes) || [];
     if (quotes.length === 0) return null;
-    // 優先挑選台灣證交所(TAI)或櫃買中心(TWO)的股票／ETF
     const preferred = quotes.find(q => (q.exchange === "TAI" || q.exchange === "TWO") && (q.quoteType === "EQUITY" || q.quoteType === "ETF"));
     const best = preferred || quotes[0];
     if (!best || !best.symbol) return null;
     return { symbol: best.symbol.toUpperCase(), name: best.shortname || best.longname || best.symbol };
   }
 
-  // 完整解析流程：內建對照表 → 純數字代碼 → 純英數代碼 → 線上以名稱搜尋（非同步）
   async function resolveSymbolAsync(raw) {
     const trimmed = raw.trim();
     const mapped = lookupNameMap(trimmed);
     if (mapped) return { symbol: mapped, name: trimmed };
     if (/^\d{4,6}[A-Z]?$/.test(trimmed)) return { symbol: trimmed + ".TW", name: null };
     if (!hasCJK(trimmed)) return { symbol: trimmed.toUpperCase(), name: null };
-    // 含中文但不在內建對照表中，線上查詢
-    try {
-      const found = await searchSymbolByName(trimmed);
-      return found; // 可能為 null
-    } catch (e) {
-      console.error("resolveSymbolAsync failed:", e);
-      return null;
-    }
+    
+    // 如果走到這步，代表官方 API 沒載入到，且輸入的是中文，才會觸發備用搜尋
+    const found = await searchSymbolByName(trimmed);
+    return found; 
   }
 
   let portfolio = [];
@@ -506,7 +469,6 @@
     toast._timer = setTimeout(() => t.classList.remove("show"), durationMs);
   }
 
-  // ---------- 計算邏輯 ----------
   function computeHolding(h) {
     const shares = h.shares;
     const tw = isTW(h.symbol);
@@ -583,7 +545,7 @@
       row.innerHTML = `
         <div class="h-symbol">
           <span class="code">${h.symbol}${c.tw ? '<span class="market-tag">TW</span>' : '<span class="market-tag">US</span>'}</span>
-          <span class="meta">${h.name ? h.name + "　" : ""}${h.updatedAt ? "更新於 " + h.updatedAt : "尚未更新報價"}</span>
+          <span class="meta">${h.name ? h.name + " " : ""}${h.updatedAt ? "更新於 " + h.updatedAt : "尚未更新報價"}</span>
         </div>
         <div class="h-cell"><span class="cell-label">數量</span>${qtyDisplay}</div>
         <div class="h-cell"><span class="cell-label">成本/股</span>${fmtMoney(h.avgCost, 2)}</div>
@@ -618,7 +580,6 @@
     renderLastUpdated();
   }
 
-  // ---------- 報價抓取 ----------
   async function fetchPrice(symbol) {
     const yahooUrl = "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(symbol) + "?interval=1d&range=1d";
     const data = await proxyFetchJson(yahooUrl);
@@ -656,7 +617,6 @@
     else toast(`更新完成：成功 ${okCount} 檔，失敗 ${failCount} 檔`);
   }
 
-  // ---------- 新增持股 ----------
   async function addHolding() {
     const symbolRaw = el("inSymbol").value.trim();
     const qtyRaw = parseFloat(el("inQty").value);
@@ -717,13 +677,17 @@
       });
     } catch (err) {
       console.error("addHolding failed:", err);
-      toast("新增時發生非預期錯誤，請稍後再試一次", 4500);
+      // 捕捉我們特別設定的 PROXY_FAILED 錯誤
+      if (err.message === "PROXY_FAILED") {
+          toast(`網路連線或代理伺服器失敗，無法自動搜尋「${symbolRaw}」。請直接輸入代碼（如 6203.TWO）`, 5000);
+      } else {
+          toast("新增時發生非預期錯誤，請稍後再試一次", 4500);
+      }
     } finally {
       addBtn.disabled = false;
     }
   }
 
-  // ---------- 匯出 / 匯入 ----------
   function exportData() {
     const blob = new Blob([JSON.stringify(portfolio, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -762,7 +726,6 @@
     reader.readAsText(file);
   }
 
-  // ---------- 事件綁定 ----------
   el("btnAdd").addEventListener("click", addHolding);
   el("inSymbol").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) addHolding(); });
   el("inCost").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) addHolding(); });
@@ -782,10 +745,10 @@
   });
   el("inSymbol").addEventListener("input", () => {
     const v = el("inSymbol").value.trim();
-    if (!v) { el("marketHint").innerHTML = '代碼含 <code>.TW</code> / <code>.TWO</code> 視為台股（買進計 0.1425% 手續費，最低 20 元；市值計算扣除 0.1425% 手續費［最低 20 元］＋0.3% 證交稅）；其餘視為美股（不計手續費與稅金）。也可直接輸入純數字代碼（如 2330）、內建常見中文簡稱（如台積電、0050），或任何台股中文名稱（新增時會自動線上查詢代碼）。'; return; }
+    if (!v) { el("marketHint").innerHTML = '代碼含 <code>.TW</code> / <code>.TWO</code> 視為台股（買進計 0.1425% 手續費，最低 20 元；市值計算扣除 0.1425% 手續費［最低 20 元］＋0.3% 證交稅）；其餘視為美股（不計手續費與稅金）。也可直接輸入純數字代碼（如 2330）或名稱（如 海韻電）。'; return; }
 
     if (hasCJK(v) && !lookupNameMap(v)) {
-      el("marketHint").innerHTML = `偵測為中文名稱，未收錄於內建對照表：按下「加入」時會自動線上查詢 <strong>${v}</strong> 對應的股票代碼（台股買進計 0.1425% 手續費［最低 20 元］；市值扣除 0.1425% 手續費［最低 20 元］＋0.3% 證交稅）。`;
+      el("marketHint").innerHTML = `系統將自動尋找 <strong>${v}</strong> 對應的代碼（台股買進計 0.1425% 手續費［最低 20 元］；市值扣除 0.1425% 手續費［最低 20 元］＋0.3% 證交稅）。`;
       return;
     }
     const resolved = resolveSymbol(v);
@@ -796,10 +759,11 @@
       : `偵測為 <strong>美股</strong>${resolvedNote}：不計手續費與稅金。`;
   });
 
-  // ---------- 初始化 ----------
+  // 初始化執行順序：讀取紀錄 -> 渲染 -> 更新報價 -> 背景載入官方 API
   load();
   renderAll();
   if (portfolio.length > 0) refreshAll();
+  loadOfficialTaiwanStocks(); // 在背景默默把兩千多檔股票塞進字典
 })();
 </script>
 </body>
