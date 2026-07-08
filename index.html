@@ -397,9 +397,21 @@
     "富邦科技": "0052.TW"
   };
 
+  // 名稱正規化：統一「臺／台」異體字、去除全形/半形空白，避免因輸入法選字差異導致比對不到
+  function normalizeName(s) {
+    return (s || "").trim().replace(/臺/g, "台").replace(/\s+/g, "");
+  }
+  const TW_NAME_MAP_NORM = {};
+  Object.keys(TW_NAME_MAP).forEach(k => { TW_NAME_MAP_NORM[normalizeName(k)] = TW_NAME_MAP[k]; });
+
+  function lookupNameMap(raw) {
+    return TW_NAME_MAP_NORM[normalizeName(raw)] || null;
+  }
+
   function resolveSymbol(raw) {
     const trimmed = raw.trim();
-    if (TW_NAME_MAP[trimmed]) return TW_NAME_MAP[trimmed];
+    const mapped = lookupNameMap(trimmed);
+    if (mapped) return mapped;
     if (/^\d{4,6}[A-Z]?$/.test(trimmed)) return trimmed + ".TW"; // 純數字（或數字+一碼字母，如可轉債）視為台股代碼，自動補 .TW
     return trimmed.toUpperCase();
   }
@@ -408,13 +420,33 @@
     return /[\u3400-\u9FFF]/.test(str);
   }
 
+  // 多組公開 CORS 代理，依序嘗試，其中一組失效時自動改用下一組，提升在 GitHub Pages 上的穩定度
+  const CORS_PROXIES = [
+    (u) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
+    (u) => "https://corsproxy.io/?url=" + encodeURIComponent(u),
+    (u) => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u)
+  ];
+
+  async function proxyFetchJson(targetUrl) {
+    let lastErr = new Error("no proxy attempted");
+    for (const buildProxyUrl of CORS_PROXIES) {
+      try {
+        const res = await fetch(buildProxyUrl(targetUrl), { cache: "no-store" });
+        if (!res.ok) { lastErr = new Error("HTTP " + res.status); continue; }
+        const data = await res.json();
+        return data;
+      } catch (e) {
+        lastErr = e;
+        continue;
+      }
+    }
+    throw lastErr;
+  }
+
   // 透過 Yahoo Finance 搜尋 API，將任意中文名稱（包含未收錄於內建對照表的個股或 ETF）解析成代碼
   async function searchSymbolByName(query) {
     const searchUrl = "https://query1.finance.yahoo.com/v1/finance/search?q=" + encodeURIComponent(query) + "&quotesCount=8&newsCount=0&lang=zh-TW&region=TW";
-    const proxyUrl = "https://api.allorigins.win/raw?url=" + encodeURIComponent(searchUrl);
-    const res = await fetch(proxyUrl);
-    if (!res.ok) throw new Error("network");
-    const data = await res.json();
+    const data = await proxyFetchJson(searchUrl);
     const quotes = (data && data.quotes) || [];
     if (quotes.length === 0) return null;
     // 優先挑選台灣證交所(TAI)或櫃買中心(TWO)的股票／ETF
@@ -427,7 +459,8 @@
   // 完整解析流程：內建對照表 → 純數字代碼 → 純英數代碼 → 線上以名稱搜尋（非同步）
   async function resolveSymbolAsync(raw) {
     const trimmed = raw.trim();
-    if (TW_NAME_MAP[trimmed]) return { symbol: TW_NAME_MAP[trimmed], name: trimmed };
+    const mapped = lookupNameMap(trimmed);
+    if (mapped) return { symbol: mapped, name: trimmed };
     if (/^\d{4,6}[A-Z]?$/.test(trimmed)) return { symbol: trimmed + ".TW", name: null };
     if (!hasCJK(trimmed)) return { symbol: trimmed.toUpperCase(), name: null };
     // 含中文但不在內建對照表中，線上查詢
@@ -435,6 +468,7 @@
       const found = await searchSymbolByName(trimmed);
       return found; // 可能為 null
     } catch (e) {
+      console.error("resolveSymbolAsync failed:", e);
       return null;
     }
   }
@@ -464,12 +498,12 @@
     localStorage.setItem(STORAGE_KEY, JSON.stringify(portfolio));
   }
 
-  function toast(msg) {
+  function toast(msg, durationMs = 2400) {
     const t = el("toast");
     t.textContent = msg;
     t.classList.add("show");
     clearTimeout(toast._timer);
-    toast._timer = setTimeout(() => t.classList.remove("show"), 2400);
+    toast._timer = setTimeout(() => t.classList.remove("show"), durationMs);
   }
 
   // ---------- 計算邏輯 ----------
@@ -512,4 +546,261 @@
     pctEl.textContent = hasPrice ? fmtPct(totalPnlPct) : "尚未取得報價";
     [pnlEl, pctEl].forEach(e => e.classList.remove("pos", "neg", "flat"));
     const cls = !hasPrice ? "flat" : (totalPnl > 0 ? "pos" : totalPnl < 0 ? "neg" : "flat");
-    pnlEl.classList.add
+    pnlEl.classList.add(cls);
+    pctEl.classList.add(cls);
+  }
+
+  function iconTrash() {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0l-1 14a2 2 0 01-2 2H7a2 2 0 01-2-2L4 6h16z"/></svg>';
+  }
+
+  function renderList() {
+    const list = el("holdingsList");
+    const empty = el("emptyState");
+    list.innerHTML = "";
+    if (portfolio.length === 0) {
+      empty.style.display = "block";
+      return;
+    }
+    empty.style.display = "none";
+
+    portfolio.forEach((h) => {
+      const c = computeHolding(h);
+      const row = document.createElement("div");
+      row.className = "holding";
+
+      const priceStr = typeof h.price === "number" ? fmtMoney(h.price, 2) : "—";
+      const valueStr = c.currentValue !== null ? fmtMoney(c.currentValue, 0) : "—";
+      const pnlCls = c.pnl === null ? "flat" : (c.pnl > 0 ? "pos" : c.pnl < 0 ? "neg" : "flat");
+      const pnlStr = c.pnl !== null ? fmtMoney(c.pnl, 0) : "—";
+      const pnlPctStr = c.pnlPct !== null ? fmtPct(c.pnlPct) : "";
+
+      const lots = h.shares / 1000;
+      const qtyDisplay = (h.shares % 1000 === 0 && h.shares >= 1000)
+        ? lots + " 張"
+        : h.shares.toLocaleString("en-US") + " 股";
+
+      row.innerHTML = `
+        <div class="h-symbol">
+          <span class="code">${h.symbol}${c.tw ? '<span class="market-tag">TW</span>' : '<span class="market-tag">US</span>'}</span>
+          <span class="meta">${h.name ? h.name + "　" : ""}${h.updatedAt ? "更新於 " + h.updatedAt : "尚未更新報價"}</span>
+        </div>
+        <div class="h-cell"><span class="cell-label">數量</span>${qtyDisplay}</div>
+        <div class="h-cell"><span class="cell-label">成本/股</span>${fmtMoney(h.avgCost, 2)}</div>
+        <div class="h-cell"><span class="cell-label">現價</span>${priceStr}</div>
+        <div class="h-cell"><span class="cell-label">市值</span>${valueStr}</div>
+        <div class="h-pnl">
+          <span class="amt ${pnlCls}">${pnlStr}</span>
+          <span class="pct ${pnlCls}">${pnlPctStr}</span>
+        </div>
+        <button class="del-btn" data-id="${h.id}" title="刪除">${iconTrash()}</button>
+      `;
+      list.appendChild(row);
+    });
+
+    list.querySelectorAll(".del-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const id = btn.getAttribute("data-id");
+        portfolio = portfolio.filter(h => h.id !== id);
+        save(); renderAll();
+        toast("已刪除持股");
+      });
+    });
+  }
+
+  function renderLastUpdated() {
+    el("lastUpdated").textContent = lastFetch ? ("報價最後更新：" + lastFetch) : "";
+  }
+
+  function renderAll() {
+    renderTotals();
+    renderList();
+    renderLastUpdated();
+  }
+
+  // ---------- 報價抓取 ----------
+  async function fetchPrice(symbol) {
+    const yahooUrl = "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(symbol) + "?interval=1d&range=1d";
+    const data = await proxyFetchJson(yahooUrl);
+    const result = data && data.chart && data.chart.result && data.chart.result[0];
+    if (!result || !result.meta) throw new Error("no data");
+    const price = result.meta.regularMarketPrice;
+    if (typeof price !== "number") throw new Error("no price");
+    return price;
+  }
+
+  async function refreshAll() {
+    if (portfolio.length === 0) { toast("尚無持股可更新"); return; }
+    const btn = el("btnRefresh");
+    btn.classList.add("spinning");
+    const now = new Date();
+    const stamp = now.toLocaleString("zh-TW", { hour12: false });
+    let okCount = 0, failCount = 0;
+
+    await Promise.all(portfolio.map(async (h) => {
+      try {
+        const price = await fetchPrice(h.symbol);
+        h.price = price;
+        h.updatedAt = now.toLocaleTimeString("zh-TW", { hour12: false });
+        okCount++;
+      } catch (e) {
+        failCount++;
+      }
+    }));
+
+    save();
+    lastFetch = stamp;
+    renderAll();
+    btn.classList.remove("spinning");
+    if (failCount === 0) toast(`已更新 ${okCount} 檔報價`);
+    else toast(`更新完成：成功 ${okCount} 檔，失敗 ${failCount} 檔`);
+  }
+
+  // ---------- 新增持股 ----------
+  async function addHolding() {
+    const symbolRaw = el("inSymbol").value.trim();
+    const qtyRaw = parseFloat(el("inQty").value);
+    const unit = el("inUnit").value;
+    const costRaw = parseFloat(el("inCost").value);
+
+    if (!symbolRaw) { toast("請輸入股票代碼"); return; }
+    if (!qtyRaw || qtyRaw <= 0) { toast("請輸入有效數量"); return; }
+    if (!(costRaw >= 0)) { toast("請輸入有效的平均成本"); return; }
+
+    const shares = unit === "lot" ? qtyRaw * 1000 : qtyRaw;
+    const addBtn = el("btnAdd");
+    const needsOnlineLookup = hasCJK(symbolRaw) && !lookupNameMap(symbolRaw);
+
+    try {
+      let resolved;
+      if (needsOnlineLookup) {
+        addBtn.disabled = true;
+        toast(`正在查詢「${symbolRaw}」對應的股票代碼…`);
+        resolved = await resolveSymbolAsync(symbolRaw);
+      } else {
+        resolved = await resolveSymbolAsync(symbolRaw);
+      }
+
+      if (!resolved || !resolved.symbol) {
+        toast(`找不到「${symbolRaw}」對應的股票代碼，請確認名稱是否正確，或改用數字代碼（如 2330）新增`, 4500);
+        return;
+      }
+      const symbol = resolved.symbol;
+      const displayName = resolved.name;
+
+      portfolio.push({
+        id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random(),
+        symbol,
+        name: displayName,
+        shares,
+        avgCost: costRaw,
+        price: null,
+        updatedAt: null
+      });
+
+      save();
+      renderAll();
+      el("inSymbol").value = "";
+      el("inQty").value = "";
+      el("inCost").value = "";
+      el("inSymbol").focus();
+      toast(displayName ? `已新增 ${symbol}（${displayName}）` : `已新增 ${symbol}`);
+      fetchPrice(symbol).then(price => {
+        const target = portfolio.find(h => h.symbol === symbol && h.price === null);
+        if (target) {
+          target.price = price;
+          target.updatedAt = new Date().toLocaleTimeString("zh-TW", { hour12: false });
+          save(); renderAll();
+        }
+      }).catch(() => {
+        toast(`${symbol} 目前抓不到報價，請確認代碼是否正確（可稍後按重新整理再試一次）`);
+      });
+    } catch (err) {
+      console.error("addHolding failed:", err);
+      toast("新增時發生非預期錯誤，請稍後再試一次", 4500);
+    } finally {
+      addBtn.disabled = false;
+    }
+  }
+
+  // ---------- 匯出 / 匯入 ----------
+  function exportData() {
+    const blob = new Blob([JSON.stringify(portfolio, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "portfolio-" + new Date().toISOString().slice(0,10) + ".json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast("已匯出 JSON 檔案");
+  }
+
+  function importData(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const parsed = JSON.parse(e.target.result);
+        if (!Array.isArray(parsed)) throw new Error("format");
+        portfolio = parsed.map(h => ({
+          id: h.id || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()),
+          symbol: (h.symbol || "").toUpperCase(),
+          name: h.name || null,
+          shares: Number(h.shares) || 0,
+          avgCost: Number(h.avgCost) || 0,
+          price: typeof h.price === "number" ? h.price : null,
+          updatedAt: h.updatedAt || null
+        }));
+        save();
+        renderAll();
+        toast(`已匯入 ${portfolio.length} 檔持股`);
+      } catch (err) {
+        toast("匯入失敗，請確認檔案格式");
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  // ---------- 事件綁定 ----------
+  el("btnAdd").addEventListener("click", addHolding);
+  el("inSymbol").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) addHolding(); });
+  el("inCost").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) addHolding(); });
+  el("btnRefresh").addEventListener("click", refreshAll);
+  el("btnExport").addEventListener("click", exportData);
+  el("btnImport").addEventListener("click", () => el("fileImport").click());
+  el("fileImport").addEventListener("change", (e) => {
+    if (e.target.files && e.target.files[0]) importData(e.target.files[0]);
+    e.target.value = "";
+  });
+  el("btnConvention").addEventListener("click", () => {
+    const cur = document.body.getAttribute("data-convention");
+    const next = cur === "tw" ? "us" : "tw";
+    document.body.setAttribute("data-convention", next);
+    localStorage.setItem(CONVENTION_KEY, next);
+    toast(next === "tw" ? "配色：紅漲綠跌（台股慣例）" : "配色：綠漲紅跌（歐美慣例）");
+  });
+  el("inSymbol").addEventListener("input", () => {
+    const v = el("inSymbol").value.trim();
+    if (!v) { el("marketHint").innerHTML = '代碼含 <code>.TW</code> / <code>.TWO</code> 視為台股（買進計 0.1425% 手續費，最低 20 元；市值計算扣除 0.1425% 手續費［最低 20 元］＋0.3% 證交稅）；其餘視為美股（不計手續費與稅金）。也可直接輸入純數字代碼（如 2330）、內建常見中文簡稱（如台積電、0050），或任何台股中文名稱（新增時會自動線上查詢代碼）。'; return; }
+
+    if (hasCJK(v) && !lookupNameMap(v)) {
+      el("marketHint").innerHTML = `偵測為中文名稱，未收錄於內建對照表：按下「加入」時會自動線上查詢 <strong>${v}</strong> 對應的股票代碼（台股買進計 0.1425% 手續費［最低 20 元］；市值扣除 0.1425% 手續費［最低 20 元］＋0.3% 證交稅）。`;
+      return;
+    }
+    const resolved = resolveSymbol(v);
+    const tw = isTW(resolved);
+    const resolvedNote = resolved !== v.toUpperCase() ? `（將以 <strong>${resolved}</strong> 查詢）` : "";
+    el("marketHint").innerHTML = tw
+      ? `偵測為 <strong>台股</strong>${resolvedNote}：買進成本加計 0.1425% 手續費（最低 20 元）；市值扣除 0.1425% 手續費（最低 20 元）＋0.3% 證交稅。`
+      : `偵測為 <strong>美股</strong>${resolvedNote}：不計手續費與稅金。`;
+  });
+
+  // ---------- 初始化 ----------
+  load();
+  renderAll();
+  if (portfolio.length > 0) refreshAll();
+})();
+</script>
+</body>
+</html>
