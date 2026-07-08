@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>投資組合追蹤器</title>
+    <style>
+        /* CSS: 高級內斂深色主題 */
+        :root {
+            --bg-color: #0d0d0d;
+            --card-bg: #1a1a1a;
+            --text-primary: #e0e0e0;
+            --text-secondary: #9e9e9e;
+            --accent-color: #3b82f6;
+            --accent-hover: #2563eb;
+            --profit-color: #10b981; /* 柔和綠 */
+            --loss-color: #ef4444;   /* 柔和紅 */
+            --border-color: #333333;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            padding: 2rem 1rem;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 1rem;
+        }
+
+        .header h1 {
+            font-size: 1.8rem;
+            font-weight: 600;
+            letter-spacing: 1px;
+        }
+
+        .actions button {
+            background-color: transparent;
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-left: 0.5rem;
+            transition: all 0.2s;
+        }
+
+        .actions button:hover {
+            background-color: var(--card-bg);
+            border-color: var(--text-secondary);
+        }
+
+        .input-card {
+            background-color: var(--card-bg);
+            padding: 1.5rem;
+            border-radius: 12px;
+            margin-bottom: 2rem;
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            align-items: flex-end;
+            border: 1px solid var(--border-color);
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            min-width: 150px;
+        }
+
+        .input-group label {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+        }
+
+        .input-group input, .input-group select {
+            background-color: #262626;
+            border: 1px solid #404040;
+            color: var(--text-primary);
+            padding: 0.75rem;
+            border-radius: 6px;
+            outline: none;
+            font-size: 1rem;
+        }
+
+        .input-group input:focus, .input-group select:focus {
+            border-color: var(--accent-color);
+        }
+
+        .input-row {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .btn-add {
+            background-color: var(--accent-color);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 500;
+            transition: background-color 0.2s;
+            height: 46px; /* 匹配輸入框高度 */
+        }
+
+        .btn-add:hover {
+            background-color: var(--accent-hover);
+        }
+
+        .status-bar {
+            margin-bottom: 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .loading {
+            color: var(--accent-color);
+            font-size: 0.9rem;
+            display: none;
+        }
+
+        .portfolio-table-wrapper {
+            background-color: var(--card-bg);
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+        }
+
+        th {
+            background-color: #1a1a1a;
+            color: var(--text-secondary);
+            font-weight: 500;
+            padding: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            font-size: 0.9rem;
+        }
+
+        td {
+            padding: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            font-size: 0.95rem;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        .profit { color: var(--profit-color); }
+        .loss { color: var(--loss-color); }
+
+        .btn-delete {
+            background-color: transparent;
+            color: var(--text-secondary);
+            border: none;
+            cursor: pointer;
+            font-size: 1.2rem;
+        }
+        .btn-delete:hover {
+            color: var(--loss-color);
+        }
+
+        /* 隱藏原生檔案上傳按鈕 */
+        #fileInput {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h1>投資組合追蹤</h1>
+        <div class="actions">
+            <button onclick="refreshPrices()">更新報價</button>
+            <button onclick="exportJSON()">匯出 JSON</button>
+            <button onclick="document.getElementById('fileInput').click()">匯入 JSON</button>
+            <input type="file" id="fileInput" accept=".json" onchange="importJSON(event)">
+        </div>
+    </div>
+
+    <div class="input-card">
+        <div class="input-group">
+            <label for="symbol">股票名稱或代號 (如: 聯發科 / AAPL / 2330.TW)</label>
+            <input type="text" id="symbol" placeholder="例如: 聯發科 或 2330.TW">
+        </div>
+        <div class="input-group">
+            <label for="price">買入單價</label>
+            <input type="number" id="price" placeholder="0.00" step="0.01">
+        </div>
+        <div class="input-group">
+            <label for="quantity">數量</label>
+            <div class="input-row">
+                <input type="number" id="quantity" placeholder="0" style="flex: 2;">
+                <select id="unit" style="flex: 1;">
+                    <option value="share">股</option>
+                    <option value="lot">張</option>
+                </select>
+            </div>
+        </div>
+        <button class="btn-add" onclick="addStock()">新增紀錄</button>
+    </div>
+
+    <div class="status-bar">
+        <h3>目前庫存</h3>
+        <span class="loading" id="loadingText">取得即時報價中...</span>
+    </div>
+
+    <div class="portfolio-table-wrapper">
+        <table id="portfolioTable">
+            <thead>
+                <tr>
+                    <th>代號</th>
+                    <th>持有股數</th>
+                    <th>買入均價</th>
+                    <th>總成本(含息費)</th>
+                    <th>最新報價</th>
+                    <th>當前市值(扣稅費)</th>
+                    <th>未實現損益</th>
+                    <th>報酬率</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody id="tableBody">
+                <!-- JavaScript 動態產生內容 -->
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    // JS: 狀態管理與業務邏輯
+    let portfolio = JSON.parse(localStorage.getItem('portfolio')) || [];
+
+    // 初始化：畫面載入時直接渲染，並嘗試更新一次報價
+    window.onload = () => {
+        renderTable();
+        if (portfolio.length > 0) {
+            refreshPrices();
+        }
+    };
+
+    // 儲存並渲染
+    function saveAndRender() {
+        localStorage.setItem('portfolio', JSON.stringify(portfolio));
+        renderTable();
+    }
+
+    // 新增股票 (包含智慧搜尋名稱功能)
+    async function addStock() {
+        let symbolInput = document.getElementById('symbol').value.trim();
+        const priceInput = parseFloat(document.getElementById('price').value);
+        let qtyInput = parseInt(document.getElementById('quantity').value);
+        const unitInput = document.getElementById('unit').value;
+
+        if (!symbolInput || isNaN(priceInput) || isNaN(qtyInput) || qtyInput <= 0) {
+            alert("請完整填寫正確的股票資訊");
+            return;
+        }
+
+        // 轉為大寫方便後續比對
+        symbolInput = symbolInput.toUpperCase();
+
+        // 智慧搜尋邏輯：如果輸入的不是標準的美股代碼或帶有後綴的台股代碼，就啟動名稱搜尋
+        const isStandardSymbol = /^[A-Z0-9.]+$/.test(symbolInput) && (symbolInput.includes('.') || symbolInput.length <= 5);
+        
+        if (!isStandardSymbol) {
+            const loading = document.getElementById('loadingText');
+            loading.innerText = "正在搜尋股票代碼...";
+            loading.style.display = 'block';
+
+            try {
+                const searchUrl = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(symbolInput)}&lang=zh-TW&region=TW`;
+                const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(searchUrl)}`;
+                
+                const response = await fetch(proxyUrl);
+                const data = await response.json();
+                const searchData = JSON.parse(data.contents);
+
+                if (searchData.quotes && searchData.quotes.length > 0) {
+                    // 取搜尋結果的第一筆
+                    const bestMatch = searchData.quotes[0];
+                    const stockName = bestMatch.shortname || bestMatch.longname || symbolInput;
+                    
+                    // 跳出確認視窗詢問使用者
+                    const confirmAdd = confirm(`系統找到最相符的股票：\n名稱：${stockName}\n代碼：${bestMatch.symbol}\n\n是否使用此股票加入投資組合？`);
+                    
+                    if (confirmAdd) {
+                        symbolInput = bestMatch.symbol;
+                    } else {
+                        loading.style.display = 'none';
+                        return; // 使用者取消，中斷流程
+                    }
+                } else {
+                    alert("找不到對應的股票名稱，請嘗試輸入精確代碼（如 2454.TW）");
+                    loading.style.display = 'none';
+                    return;
+                }
+            } catch (error) {
+                console.error("搜尋代碼失敗:", error);
+                alert("搜尋股票時發生錯誤，請直接輸入股票代碼");
+                loading.style.display = 'none';
+                return;
+            }
+            loading.style.display = 'none';
+        }
+
+        // 單位換算：1張 = 1000股
+        if (unitInput === 'lot') {
+            qtyInput = qtyInput * 1000;
+        }
+
+        // 判斷是否為台股 (包含 .TW 或 .TWO)
+        const isTWStock = symbolInput.includes('.TW') || symbolInput.includes('.TWO');
+
+        // 計算買入成本 (含手續費)
+        let buyFee = 0;
+        if (isTWStock) {
+            buyFee = Math.floor(priceInput * qtyInput * 0.001425); // 台股買進手續費
+        }
+        const totalCost = (priceInput * qtyInput) + buyFee;
+
+        // 建立新物件加入陣列
+        const newRecord = {
+            id: Date.now().toString(), // 唯一識別碼
+            symbol: symbolInput,
+            buyPrice: priceInput,
+            shares: qtyInput,
+            isTW: isTWStock,
+            totalCost: totalCost,
+            currentPrice: priceInput, // 預設為買入價，等更新報價後覆蓋
+        };
+
+        portfolio.push(newRecord);
+        
+        // 清空輸入框
+        document.getElementById('symbol').value = '';
+        document.getElementById('price').value = '';
+        document.getElementById('quantity').value = '';
+
+        saveAndRender();
+        refreshPrices(); // 新增後立刻抓最新價
+    }
+
+    // 刪除紀錄
+    function deleteStock(id) {
+        portfolio = portfolio.filter(stock => stock.id !== id);
+        saveAndRender();
+    }
+
+    // 更新報價 (核心 API 邏輯)
+    async function refreshPrices() {
+        const loading = document.getElementById('loadingText');
+        loading.innerText = "取得即時報價中...";
+        loading.style.display = 'block';
+
+        let updatedCount = 0;
+
+        for (let i = 0; i < portfolio.length; i++) {
+            let stock = portfolio[i];
+            try {
+                const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${stock.symbol}`;
+                const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(yahooUrl)}`;
+                
+                const response = await fetch(proxyUrl);
+                const data = await response.json();
+                const yahooData = JSON.parse(data.contents);
+
+                if (yahooData.chart && yahooData.chart.result && yahooData.chart.result.length > 0) {
+                    const price = yahooData.chart.result[0].meta.regularMarketPrice;
+                    portfolio[i].currentPrice = price;
+                    updatedCount++;
+                }
+            } catch (error) {
+                console.error(`獲取 ${stock.symbol} 報價失敗:`, error);
+            }
+        }
+
+        if (updatedCount > 0) {
+            saveAndRender();
+        } else {
+            console.log("未取得新報價，可能收盤或網路異常");
+        }
+        
+        loading.style.display = 'none';
+    }
+
+    // 繪製表格
+    function renderTable() {
+        const tbody = document.getElementById('tableBody');
+        tbody.innerHTML = '';
+
+        if (portfolio.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; color: var(--text-secondary);">尚無庫存紀錄，請從上方新增。</td></tr>';
+            return;
+        }
+
+        portfolio.forEach(stock => {
+            // 計算當前真實市值與稅費
+            let sellFee = 0;
+            let sellTax = 0;
+            const rawCurrentValue = stock.currentPrice * stock.shares;
+
+            if (stock.isTW) {
+                sellFee = Math.floor(rawCurrentValue * 0.001425);
+                sellTax = Math.floor(rawCurrentValue * 0.003);
+            }
+
+            const netCurrentValue = rawCurrentValue - sellFee - sellTax;
+            const profitLoss = netCurrentValue - stock.totalCost;
+            const profitLossPercent = (profitLoss / stock.totalCost) * 100;
+
+            // 決定顏色 class
+            const colorClass = profitLoss >= 0 ? 'profit' : 'loss';
+            const sign = profitLoss > 0 ? '+' : '';
+
+            // 建立表格列
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><strong>${stock.symbol}</strong></td>
+                <td>${stock.shares} 股</td>
+                <td>${stock.buyPrice.toFixed(2)}</td>
+                <td>${stock.totalCost.toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
+                <td>${stock.currentPrice.toFixed(2)}</td>
+                <td>${netCurrentValue.toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
+                <td class="${colorClass}">${sign}${profitLoss.toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
+                <td class="${colorClass}">${sign}${profitLossPercent.toFixed(2)}%</td>
+                <td>
+                    <button class="btn-delete" onclick="deleteStock('${stock.id}')">×</button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    // 匯出 JSON
+    function exportJSON() {
+        if (portfolio.length === 0) {
+            alert("沒有資料可以匯出");
+            return;
+        }
+        const dataStr = JSON.stringify(portfolio, null, 2);
+        const blob = new Blob([dataStr], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `portfolio_backup_${new Date().toISOString().slice(0,10)}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    // 匯入 JSON
+    function importJSON(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const importedData = JSON.parse(e.target.result);
+                if (Array.isArray(importedData)) {
+                    portfolio = importedData;
+                    saveAndRender();
+                    refreshPrices();
+                    alert("資料匯入成功！");
+                } else {
+                    alert("檔案格式不正確");
+                }
+            } catch (err) {
+                alert("讀取檔案失敗，請確認是否為正確的 JSON 格式");
+            }
+            event.target.value = '';
+        };
+        reader.readAsText(file);
+    }
+</script>
+
+</body>
+</html>
+
