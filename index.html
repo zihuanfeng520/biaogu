@@ -323,7 +323,7 @@
   const TW_TAX = 0.003;
   const TW_MIN_FEE = 20;
 
-  // 初始內建對照表（稍後會由官方 API 自動擴充）
+  // 初始內建對照表
   const TW_NAME_MAP = {
     "台積電": "2330.TW", "台积电": "2330.TW",
     "鴻海": "2317.TW", "鸿海": "2317.TW",
@@ -345,31 +345,45 @@
   // 初始化正規化對照表
   Object.keys(TW_NAME_MAP).forEach(k => { TW_NAME_MAP_NORM[normalizeName(k)] = TW_NAME_MAP[k]; });
 
-  const CORS_PROXIES = [
-    (u) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
-    (u) => "https://corsproxy.io/?url=" + encodeURIComponent(u),
-    (u) => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u)
-  ];
-
+  // ===== 修改的核心：強化版的代理請求函數 =====
   async function proxyFetchJson(targetUrl) {
-    let lastErr = new Error("PROXY_FAILED"); // 明確定義代理失敗的錯誤類型
-    for (const buildProxyUrl of CORS_PROXIES) {
-      try {
-        const res = await fetch(buildProxyUrl(targetUrl), { cache: "no-store" });
-        if (!res.ok) continue;
-        const data = await res.json();
-        return data;
-      } catch (e) {
-        continue; // 嘗試下一個代理
+    let lastErr = new Error("PROXY_FAILED"); 
+    
+    // 方法一：AllOrigins (使用 /get 模式，它會把資料包裝在 contents 欄位，確保通過 CORS)
+    try {
+      const res = await fetch("https://api.allorigins.win/get?url=" + encodeURIComponent(targetUrl), { cache: "no-store" });
+      if (res.ok) {
+        const wrapper = await res.json();
+        // 如果成功抓到，解析裡面的字串為 JSON
+        if (wrapper.contents) return JSON.parse(wrapper.contents);
       }
+    } catch (e) {
+      console.warn("AllOrigins 代理失敗", e);
     }
-    throw lastErr; // 全部失敗才丟出
-  }
 
-  // 背景非同步載入官方上市櫃股票清單，大幅擴充本地對照表 (透過代理繞過 CORS)
+    // 方法二：CorsProxy.io (備用)
+    try {
+      const res = await fetch("https://corsproxy.io/?url=" + encodeURIComponent(targetUrl), { cache: "no-store" });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.warn("CorsProxy 代理失敗", e);
+    }
+
+    // 方法三：CodeTabs (備用)
+    try {
+      const res = await fetch("https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(targetUrl), { cache: "no-store" });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.warn("CodeTabs 代理失敗", e);
+    }
+
+    throw lastErr; // 全部失敗才丟出例外
+  }
+  // ===========================================
+
+  // 背景非同步載入官方上市櫃股票清單
   async function loadOfficialTaiwanStocks() {
     try {
-      // 透過我們的 proxyFetchJson 繞過 CORS 抓取證交所(上市) OpenAPI
       const twseData = await proxyFetchJson("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL");
       if (Array.isArray(twseData)) {
         twseData.forEach(item => {
@@ -377,11 +391,10 @@
         });
       }
     } catch (e) {
-      console.warn("載入證交所清單失敗，將依賴原有對照表與 Yahoo 搜尋", e);
+      console.warn("載入證交所清單失敗", e);
     }
 
     try {
-      // 透過我們的 proxyFetchJson 繞過 CORS 抓取櫃買中心(上櫃) OpenAPI
       const tpexData = await proxyFetchJson("https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O");
       if (Array.isArray(tpexData)) {
         tpexData.forEach(item => {
@@ -391,7 +404,7 @@
         });
       }
     } catch (e) {
-      console.warn("載入櫃買中心清單失敗，將依賴原有對照表與 Yahoo 搜尋", e);
+      console.warn("載入櫃買中心清單失敗", e);
     }
   }
 
@@ -429,7 +442,6 @@
     if (/^\d{4,6}[A-Z]?$/.test(trimmed)) return { symbol: trimmed + ".TW", name: null };
     if (!hasCJK(trimmed)) return { symbol: trimmed.toUpperCase(), name: null };
     
-    // 如果走到這步，代表官方 API 沒載入到，且輸入的是中文，才會觸發備用搜尋
     const found = await searchSymbolByName(trimmed);
     return found; 
   }
@@ -640,7 +652,7 @@
       }
 
       if (!resolved || !resolved.symbol) {
-        toast(`找不到「${symbolRaw}」對應的股票代碼，請確認名稱是否正確，或改用數字代碼（如 2330）新增`, 4500);
+        toast(`找不到「${symbolRaw}」對應的股票代碼，請確認名稱是否正確，或改用數字代碼新增`, 4500);
         return;
       }
       const symbol = resolved.symbol;
@@ -675,9 +687,8 @@
       });
     } catch (err) {
       console.error("addHolding failed:", err);
-      // 捕捉我們特別設定的 PROXY_FAILED 錯誤
       if (err.message === "PROXY_FAILED") {
-          toast(`網路連線或代理伺服器失敗，無法自動搜尋「${symbolRaw}」。請直接輸入代碼（如 6203.TWO）`, 5000);
+          toast(`網路連線或代理伺服器失敗，無法自動搜尋「${symbolRaw}」。請直接輸入代碼`, 5000);
       } else {
           toast("新增時發生非預期錯誤，請稍後再試一次", 4500);
       }
@@ -761,7 +772,7 @@
   load();
   renderAll();
   if (portfolio.length > 0) refreshAll();
-  loadOfficialTaiwanStocks(); // 在背景默默把兩千多檔股票塞進字典
+  loadOfficialTaiwanStocks(); 
 })();
 </script>
 </body>
