@@ -1,508 +1,515 @@
 <!DOCTYPE html>
-<html lang="zh-TW">
+<html lang="zh-Hant">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>投資組合追蹤器</title>
-    <style>
-        /* CSS: 高級內斂深色主題 */
-        :root {
-            --bg-color: #0d0d0d;
-            --card-bg: #1a1a1a;
-            --text-primary: #e0e0e0;
-            --text-secondary: #9e9e9e;
-            --accent-color: #3b82f6;
-            --accent-hover: #2563eb;
-            --profit-color: #10b981; /* 柔和綠 */
-            --loss-color: #ef4444;   /* 柔和紅 */
-            --border-color: #333333;
-        }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>持倉 — 投資組合損益追蹤面板</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0c;
+    --bg-elevated: #131316;
+    --card: #17171b;
+    --card-hover: #1d1d22;
+    --border: #27272e;
+    --border-soft: #1e1e24;
+    --text: #eceeef;
+    --text-dim: #8d8d97;
+    --text-faint: #58585f;
+    --accent: #c9a86a;
+    --up: #e0665c;      /* 預設台股慣例：紅漲 */
+    --down: #4ec793;    /* 預設台股慣例：綠跌 */
+    --up-bg: rgba(224, 102, 92, 0.10);
+    --down-bg: rgba(78, 199, 147, 0.10);
+    --radius: 14px;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+    --display: 'Space Grotesk', 'Inter', sans-serif;
+    --body: 'Inter', -apple-system, sans-serif;
+  }
+  [data-convention="us"] {
+    --up: #4ec793;
+    --down: #e0665c;
+    --up-bg: rgba(78, 199, 147, 0.10);
+    --down-bg: rgba(224, 102, 92, 0.10);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { color-scheme: dark; }
+  body {
+    background: var(--bg);
+    background-image:
+      radial-gradient(ellipse 900px 500px at 15% -10%, rgba(201,168,106,0.06), transparent),
+      radial-gradient(ellipse 700px 400px at 90% 0%, rgba(78,199,147,0.04), transparent);
+    color: var(--text);
+    font-family: var(--body);
+    min-height: 100vh;
+    padding-bottom: 80px;
+  }
+  a { color: inherit; }
 
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-        }
+  .shell { max-width: 960px; margin: 0 auto; padding: 0 20px; }
 
-        body {
-            background-color: var(--bg-color);
-            color: var(--text-primary);
-            padding: 2rem 1rem;
-            line-height: 1.6;
-        }
+  /* ---------- Header ---------- */
+  header.top {
+    position: sticky; top: 0; z-index: 30;
+    backdrop-filter: blur(14px);
+    background: rgba(10,10,12,0.72);
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .top-inner {
+    max-width: 960px; margin: 0 auto; padding: 16px 20px;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  }
+  .brand { display: flex; align-items: baseline; gap: 10px; }
+  .brand .mark {
+    font-family: var(--display); font-weight: 700; font-size: 19px; letter-spacing: -0.02em;
+  }
+  .brand .sub { font-size: 12px; color: var(--text-faint); font-family: var(--mono); letter-spacing: 0.04em; }
+  .top-actions { display: flex; gap: 8px; }
+  .icon-btn {
+    background: var(--card); border: 1px solid var(--border); color: var(--text-dim);
+    width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center;
+    cursor: pointer; transition: all .15s ease;
+  }
+  .icon-btn:hover { background: var(--card-hover); color: var(--text); border-color: #35353c; }
+  .icon-btn svg { width: 17px; height: 17px; }
+  .icon-btn.spinning svg { animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
-        .container {
-            max-width: 1000px;
-            margin: 0 auto;
-        }
+  /* ---------- Hero ---------- */
+  .hero {
+    padding: 40px 0 28px;
+    display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 28px;
+  }
+  .hero-block .label {
+    font-size: 12px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;
+  }
+  .hero-block .num {
+    font-family: var(--mono); font-weight: 600; font-size: 34px; font-variant-numeric: tabular-nums; letter-spacing: -0.01em;
+  }
+  .hero-block.total .num { font-size: 40px; }
+  .hero-block .sub-num {
+    font-family: var(--mono); font-size: 14px; margin-top: 6px; font-variant-numeric: tabular-nums;
+  }
+  .pos { color: var(--up); } .neg { color: var(--down); } .flat { color: var(--text-dim); }
+  .pos-bg { background: var(--up-bg); } .neg-bg { background: var(--down-bg); }
 
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 2rem;
-            border-bottom: 1px solid var(--border-color);
-            padding-bottom: 1rem;
-        }
+  @media (max-width: 640px) {
+    .hero { grid-template-columns: 1fr; gap: 18px; padding: 28px 0 20px; }
+    .hero-block.total .num { font-size: 32px; }
+  }
 
-        .header h1 {
-            font-size: 1.8rem;
-            font-weight: 600;
-            letter-spacing: 1px;
-        }
+  /* ---------- Add form ---------- */
+  .panel {
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 20px; margin-bottom: 20px;
+  }
+  .panel-title {
+    font-family: var(--display); font-size: 14px; font-weight: 600; color: var(--text-dim);
+    margin-bottom: 14px; letter-spacing: 0.01em;
+  }
+  .form-grid {
+    display: grid; grid-template-columns: 1.1fr 1.3fr 1fr auto; gap: 10px; align-items: end;
+  }
+  .field label {
+    display: block; font-size: 11px; color: var(--text-faint); margin-bottom: 6px; letter-spacing: 0.03em;
+  }
+  .field input, .field select {
+    width: 100%; background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text);
+    padding: 10px 12px; border-radius: 9px; font-size: 14px; font-family: var(--body); outline: none;
+    transition: border-color .15s ease;
+  }
+  .field input:focus, .field select:focus { border-color: var(--accent); }
+  .qty-group { display: flex; gap: 6px; }
+  .qty-group input { flex: 1.4; }
+  .qty-group select { flex: 1; }
+  .btn-primary {
+    background: var(--accent); color: #16130a; border: none; padding: 10px 20px; border-radius: 9px;
+    font-weight: 600; font-size: 14px; cursor: pointer; white-space: nowrap; font-family: var(--body);
+    transition: filter .15s ease, transform .1s ease;
+  }
+  .btn-primary:hover { filter: brightness(1.08); }
+  .btn-primary:active { transform: scale(0.98); }
+  .hint { font-size: 12px; color: var(--text-faint); margin-top: 10px; line-height: 1.6; }
+  .market-tag {
+    display: inline-block; font-family: var(--mono); font-size: 10px; padding: 2px 7px; border-radius: 5px;
+    border: 1px solid var(--border); color: var(--text-dim); margin-left: 8px; vertical-align: middle;
+  }
 
-        .actions button {
-            background-color: transparent;
-            color: var(--text-primary);
-            border: 1px solid var(--border-color);
-            padding: 0.5rem 1rem;
-            border-radius: 6px;
-            cursor: pointer;
-            margin-left: 0.5rem;
-            transition: all 0.2s;
-        }
+  @media (max-width: 700px) {
+    .form-grid { grid-template-columns: 1fr 1fr; }
+    .form-grid .btn-primary { grid-column: 1 / -1; }
+  }
 
-        .actions button:hover {
-            background-color: var(--card-bg);
-            border-color: var(--text-secondary);
-        }
+  /* ---------- Holdings list ---------- */
+  .list-head {
+    display: grid; grid-template-columns: 1.4fr 0.9fr 1fr 1fr 1fr 1.1fr 36px;
+    padding: 0 18px 10px; font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .holding {
+    display: grid; grid-template-columns: 1.4fr 0.9fr 1fr 1fr 1fr 1.1fr 36px;
+    align-items: center; gap: 8px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px 18px; margin-bottom: 10px; transition: background .15s ease, border-color .15s ease;
+  }
+  .holding:hover { background: var(--card-hover); border-color: #33333a; }
+  .h-symbol { display: flex; flex-direction: column; gap: 3px; }
+  .h-symbol .code { font-family: var(--display); font-weight: 600; font-size: 15px; }
+  .h-symbol .meta { font-size: 11px; color: var(--text-faint); font-family: var(--mono); }
+  .h-cell { font-family: var(--mono); font-size: 13.5px; font-variant-numeric: tabular-nums; color: var(--text); }
+  .h-cell .cell-label { display: none; }
+  .h-pnl { display: flex; flex-direction: column; gap: 2px; }
+  .h-pnl .amt { font-family: var(--mono); font-weight: 600; font-size: 14px; font-variant-numeric: tabular-nums; }
+  .h-pnl .pct { font-family: var(--mono); font-size: 11.5px; }
+  .del-btn {
+    background: none; border: none; color: var(--text-faint); cursor: pointer; width: 32px; height: 32px;
+    display: flex; align-items: center; justify-content: center; border-radius: 8px; transition: all .15s ease;
+    justify-self: end;
+  }
+  .del-btn:hover { background: rgba(224,102,92,0.12); color: var(--up); }
+  .del-btn svg { width: 15px; height: 15px; }
 
-        .input-card {
-            background-color: var(--card-bg);
-            padding: 1.5rem;
-            border-radius: 12px;
-            margin-bottom: 2rem;
-            display: flex;
-            gap: 1rem;
-            flex-wrap: wrap;
-            align-items: flex-end;
-            border: 1px solid var(--border-color);
-        }
+  @media (max-width: 780px) {
+    .list-head { display: none; }
+    .holding {
+      grid-template-columns: 1fr 1fr; grid-template-areas:
+        "sym sym"
+        "qty price"
+        "cost value"
+        "pnl del";
+      row-gap: 10px;
+    }
+    .h-symbol { grid-area: sym; }
+    .holding > .h-cell:nth-of-type(1) { grid-area: qty; }
+    .holding > .h-cell:nth-of-type(2) { grid-area: price; }
+    .holding > .h-cell:nth-of-type(3) { grid-area: cost; }
+    .holding > .h-cell:nth-of-type(4) { grid-area: value; }
+    .h-pnl { grid-area: pnl; }
+    .del-btn { grid-area: del; }
+    .h-cell .cell-label { display: block; font-size: 10px; color: var(--text-faint); text-transform: uppercase; margin-bottom: 3px; letter-spacing: 0.05em; }
+  }
 
-        .input-group {
-            display: flex;
-            flex-direction: column;
-            flex: 1;
-            min-width: 150px;
-        }
+  .empty {
+    text-align: center; padding: 60px 20px; color: var(--text-faint);
+  }
+  .empty svg { width: 40px; height: 40px; margin-bottom: 14px; opacity: 0.5; }
+  .empty p { font-size: 14px; }
 
-        .input-group label {
-            font-size: 0.85rem;
-            color: var(--text-secondary);
-            margin-bottom: 0.5rem;
-        }
+  .footer-actions {
+    display: flex; justify-content: center; gap: 10px; margin-top: 28px;
+  }
+  .btn-ghost {
+    background: transparent; border: 1px solid var(--border); color: var(--text-dim);
+    padding: 9px 16px; border-radius: 9px; font-size: 13px; cursor: pointer; font-family: var(--body);
+    display: flex; align-items: center; gap: 7px; transition: all .15s ease;
+  }
+  .btn-ghost:hover { border-color: #3a3a42; color: var(--text); background: var(--card); }
+  .btn-ghost svg { width: 14px; height: 14px; }
 
-        .input-group input, .input-group select {
-            background-color: #262626;
-            border: 1px solid #404040;
-            color: var(--text-primary);
-            padding: 0.75rem;
-            border-radius: 6px;
-            outline: none;
-            font-size: 1rem;
-        }
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: var(--card); border: 1px solid var(--border); color: var(--text);
+    padding: 12px 20px; border-radius: 10px; font-size: 13px; opacity: 0; transition: all .25s ease;
+    pointer-events: none; z-index: 50; box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
-        .input-group input:focus, .input-group select:focus {
-            border-color: var(--accent-color);
-        }
-
-        .input-row {
-            display: flex;
-            gap: 0.5rem;
-        }
-
-        .btn-add {
-            background-color: var(--accent-color);
-            color: white;
-            border: none;
-            padding: 0.75rem 1.5rem;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 1rem;
-            font-weight: 500;
-            transition: background-color 0.2s;
-            height: 46px; /* 匹配輸入框高度 */
-        }
-
-        .btn-add:hover {
-            background-color: var(--accent-hover);
-        }
-
-        .status-bar {
-            margin-bottom: 1rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .loading {
-            color: var(--accent-color);
-            font-size: 0.9rem;
-            display: none;
-        }
-
-        .portfolio-table-wrapper {
-            background-color: var(--card-bg);
-            border-radius: 12px;
-            border: 1px solid var(--border-color);
-            overflow-x: auto;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            text-align: left;
-        }
-
-        th {
-            background-color: #1a1a1a;
-            color: var(--text-secondary);
-            font-weight: 500;
-            padding: 1rem;
-            border-bottom: 1px solid var(--border-color);
-            font-size: 0.9rem;
-        }
-
-        td {
-            padding: 1rem;
-            border-bottom: 1px solid var(--border-color);
-            font-size: 0.95rem;
-        }
-
-        tr:last-child td {
-            border-bottom: none;
-        }
-
-        .profit { color: var(--profit-color); }
-        .loss { color: var(--loss-color); }
-
-        .btn-delete {
-            background-color: transparent;
-            color: var(--text-secondary);
-            border: none;
-            cursor: pointer;
-            font-size: 1.2rem;
-        }
-        .btn-delete:hover {
-            color: var(--loss-color);
-        }
-
-        /* 隱藏原生檔案上傳按鈕 */
-        #fileInput {
-            display: none;
-        }
-    </style>
+  .last-updated { text-align: center; font-size: 11.5px; color: var(--text-faint); margin-top: 16px; font-family: var(--mono); }
+</style>
 </head>
-<body>
+<body data-convention="tw">
 
-<div class="container">
-    <div class="header">
-        <h1>投資組合追蹤</h1>
-        <div class="actions">
-            <button onclick="refreshPrices()">更新報價</button>
-            <button onclick="exportJSON()">匯出 JSON</button>
-            <button onclick="document.getElementById('fileInput').click()">匯入 JSON</button>
-            <input type="file" id="fileInput" accept=".json" onchange="importJSON(event)">
-        </div>
+<header class="top">
+  <div class="top-inner">
+    <div class="brand">
+      <span class="mark">持倉</span>
+      <span class="sub">PORTFOLIO — TW / US</span>
     </div>
+    <div class="top-actions">
+      <button class="icon-btn" id="btnConvention" title="切換漲跌配色慣例">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 16V4M7 4L3 8M7 4l4 4M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>
+      </button>
+      <button class="icon-btn" id="btnRefresh" title="重新整理報價">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.36-3.36L23 10M1 14l5.13 4.36A9 9 0 0020.49 15"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
 
-    <div class="input-card">
-        <div class="input-group">
-            <label for="symbol">股票名稱或代號 (如: 聯發科 / AAPL / 2330.TW)</label>
-            <input type="text" id="symbol" placeholder="例如: 聯發科 或 2330.TW">
-        </div>
-        <div class="input-group">
-            <label for="price">買入單價</label>
-            <input type="number" id="price" placeholder="0.00" step="0.01">
-        </div>
-        <div class="input-group">
-            <label for="quantity">數量</label>
-            <div class="input-row">
-                <input type="number" id="quantity" placeholder="0" style="flex: 2;">
-                <select id="unit" style="flex: 1;">
-                    <option value="share">股</option>
-                    <option value="lot">張</option>
-                </select>
-            </div>
-        </div>
-        <button class="btn-add" onclick="addStock()">新增紀錄</button>
-    </div>
+<div class="shell">
 
-    <div class="status-bar">
-        <h3>目前庫存</h3>
-        <span class="loading" id="loadingText">取得即時報價中...</span>
+  <section class="hero">
+    <div class="hero-block total">
+      <div class="label">總市值</div>
+      <div class="num" id="totalValue">$0</div>
+      <div class="sub-num flat" id="totalCostLine">成本 $0</div>
     </div>
+    <div class="hero-block">
+      <div class="label">總損益</div>
+      <div class="num flat" id="totalPnl">$0</div>
+      <div class="sub-num flat" id="totalPnlPct">0.00%</div>
+    </div>
+    <div class="hero-block">
+      <div class="label">持股檔數</div>
+      <div class="num" id="totalCount" style="color:var(--text-dim)">0</div>
+      <div class="sub-num flat">&nbsp;</div>
+    </div>
+  </section>
 
-    <div class="portfolio-table-wrapper">
-        <table id="portfolioTable">
-            <thead>
-                <tr>
-                    <th>代號</th>
-                    <th>持有股數</th>
-                    <th>買入均價</th>
-                    <th>總成本(含息費)</th>
-                    <th>最新報價</th>
-                    <th>當前市值(扣稅費)</th>
-                    <th>未實現損益</th>
-                    <th>報酬率</th>
-                    <th>操作</th>
-                </tr>
-            </thead>
-            <tbody id="tableBody">
-                <!-- JavaScript 動態產生內容 -->
-            </tbody>
-        </table>
+  <div class="panel">
+    <div class="panel-title">新增持股</div>
+    <div class="form-grid">
+      <div class="field">
+        <label for="inSymbol">代碼</label>
+        <input type="text" id="inSymbol" placeholder="例如 2330.TW 或 AAPL" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="inQty">數量</label>
+        <div class="qty-group">
+          <input type="number" id="inQty" placeholder="0" min="0" step="any">
+          <select id="inUnit">
+            <option value="share">股</option>
+            <option value="lot">張 (=1000股)</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label for="inCost">平均成本 / 股</label>
+        <input type="number" id="inCost" placeholder="0.00" min="0" step="any">
+      </div>
+      <button class="btn-primary" id="btnAdd">加入</button>
     </div>
+    <div class="hint" id="marketHint">代碼含 <code>.TW</code> / <code>.TWO</code> 視為台股（買進計 0.1425% 手續費，最低 20 元；市值計算扣除 0.1425% 手續費［最低 20 元］＋0.3% 證交稅）；其餘視為美股（不計手續費與稅金）。也可直接輸入純數字代碼（如 2330）或常見中文簡稱（如台積電）。</div>
+  </div>
+
+  <div class="list-head">
+    <div>代碼</div><div>數量</div><div>成本</div><div>現價</div><div>市值</div><div>損益</div><div></div>
+  </div>
+
+  <div id="holdingsList"></div>
+
+  <div class="empty" id="emptyState" style="display:none">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 3v18h18M7 14l4-4 4 4 5-6"/></svg>
+    <p>尚未新增任何持股，從上方開始建立你的投資組合。</p>
+  </div>
+
+  <div class="footer-actions">
+    <button class="btn-ghost" id="btnExport">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+      匯出 JSON
+    </button>
+    <button class="btn-ghost" id="btnImport">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+      匯入 JSON
+    </button>
+    <input type="file" id="fileImport" accept="application/json" style="display:none">
+  </div>
+
+  <div class="last-updated" id="lastUpdated"></div>
+
 </div>
 
+<div class="toast" id="toast"></div>
+
 <script>
-    // JS: 狀態管理與業務邏輯
-    let portfolio = JSON.parse(localStorage.getItem('portfolio')) || [];
+(function(){
+  "use strict";
 
-    // 初始化：畫面載入時直接渲染，並嘗試更新一次報價
-    window.onload = () => {
-        renderTable();
-        if (portfolio.length > 0) {
-            refreshPrices();
-        }
-    };
+  const STORAGE_KEY = "portfolio_tracker_v1";
+  const CONVENTION_KEY = "portfolio_tracker_convention";
+  const TW_BUY_FEE = 0.001425;
+  const TW_SELL_FEE = 0.001425;
+  const TW_TAX = 0.003;
+  const TW_MIN_FEE = 20; // 台股券商常見最低手續費（新台幣）
 
-    // 儲存並渲染
-    function saveAndRender() {
-        localStorage.setItem('portfolio', JSON.stringify(portfolio));
-        renderTable();
+  // 常見台股個股與 ETF 中文名稱 → 代碼對照，供離線快速比對（未收錄的名稱會在加入時自動連線查詢）
+  const TW_NAME_MAP = {
+    "台積電": "2330.TW", "台积电": "2330.TW",
+    "鴻海": "2317.TW", "鸿海": "2317.TW",
+    "聯發科": "2454.TW", "联发科": "2454.TW",
+    "台達電": "2308.TW", "台达电": "2308.TW",
+    "中華電": "2412.TW", "中华电": "2412.TW",
+    "國泰金": "2882.TW", "国泰金": "2882.TW",
+    "富邦金": "2881.TW",
+    "中信金": "2891.TW",
+    "台塑": "1301.TW",
+    "南亞": "1303.TW", "南亚": "1303.TW",
+    "台化": "1326.TW",
+    "大立光": "3008.TW",
+    "統一": "1216.TW", "统一": "1216.TW",
+    "中鋼": "2002.TW", "中钢": "2002.TW",
+    "兆豐金": "2886.TW", "兆丰金": "2886.TW",
+    "玉山金": "2884.TW",
+    "台新金": "2887.TW",
+    "第一金": "2892.TW",
+    "合庫金": "5880.TW",
+    "永豐金": "2890.TW",
+    "華南金": "2880.TW",
+    "開發金": "2883.TW",
+    "新光金": "2888.TW",
+    "元大金": "2885.TW",
+    "台灣大": "3045.TW",
+    "遠傳": "4904.TW",
+    "廣達": "2382.TW",
+    "緯創": "3231.TW",
+    "和碩": "4938.TW",
+    "仁寶": "2324.TW",
+    "英業達": "2356.TW",
+    "技嘉": "2376.TW",
+    "微星": "2377.TW",
+    "華碩": "2357.TW",
+    "宏碁": "2353.TW",
+    "研華": "2395.TW",
+    "台灣化學纖維": "1326.TW",
+    "日月光投控": "3711.TW",
+    "聯電": "2303.TW", "联电": "2303.TW",
+    "群創": "3481.TW",
+    "友達": "2409.TW",
+    "長榮": "2603.TW",
+    "陽明": "2609.TW",
+    "萬海": "2615.TW",
+    "中鴻": "2014.TW",
+    "南亞科": "2408.TW",
+    "京元電子": "2449.TW",
+    "旺宏": "2337.TW",
+    "世芯-KY": "3661.TW",
+    "創見": "2451.TW",
+    "上緯投控": "3708.TW",
+    "元大台灣50": "0050.TW", "元大台湾50": "0050.TW",
+    "元大台灣50反1": "00632R.TW",
+    "元大高股息": "0056.TW",
+    "國泰永續高股息": "00878.TW",
+    "富邦台50": "006208.TW",
+    "復華台灣科技優息": "00929.TW",
+    "群益台灣精選高息": "00919.TW",
+    "元大台灣high dividend低波動": "00713.TW",
+    "國泰台灣科技龍頭": "00881.TW",
+    "富邦公司治理": "00692.TW",
+    "元大MSCI台灣": "006203.TW",
+    "永豐台灣加權": "006204.TW",
+    "中信中國高股息": "00882.TW",
+    "元大美債20年": "00679B.TW",
+    "國泰20年美債": "00687B.TW",
+    "凱基優選高股息30": "00915.TW",
+    "野村台灣趨勢": "00668.TW",
+    "元大電子": "0053.TW",
+    "富邦科技": "0052.TW"
+  };
+
+  function resolveSymbol(raw) {
+    const trimmed = raw.trim();
+    if (TW_NAME_MAP[trimmed]) return TW_NAME_MAP[trimmed];
+    if (/^\d{4,6}[A-Z]?$/.test(trimmed)) return trimmed + ".TW"; // 純數字（或數字+一碼字母，如可轉債）視為台股代碼，自動補 .TW
+    return trimmed.toUpperCase();
+  }
+
+  function hasCJK(str) {
+    return /[\u3400-\u9FFF]/.test(str);
+  }
+
+  // 透過 Yahoo Finance 搜尋 API，將任意中文名稱（包含未收錄於內建對照表的個股或 ETF）解析成代碼
+  async function searchSymbolByName(query) {
+    const searchUrl = "https://query1.finance.yahoo.com/v1/finance/search?q=" + encodeURIComponent(query) + "&quotesCount=8&newsCount=0&lang=zh-TW&region=TW";
+    const proxyUrl = "https://api.allorigins.win/raw?url=" + encodeURIComponent(searchUrl);
+    const res = await fetch(proxyUrl);
+    if (!res.ok) throw new Error("network");
+    const data = await res.json();
+    const quotes = (data && data.quotes) || [];
+    if (quotes.length === 0) return null;
+    // 優先挑選台灣證交所(TAI)或櫃買中心(TWO)的股票／ETF
+    const preferred = quotes.find(q => (q.exchange === "TAI" || q.exchange === "TWO") && (q.quoteType === "EQUITY" || q.quoteType === "ETF"));
+    const best = preferred || quotes[0];
+    if (!best || !best.symbol) return null;
+    return { symbol: best.symbol.toUpperCase(), name: best.shortname || best.longname || best.symbol };
+  }
+
+  // 完整解析流程：內建對照表 → 純數字代碼 → 純英數代碼 → 線上以名稱搜尋（非同步）
+  async function resolveSymbolAsync(raw) {
+    const trimmed = raw.trim();
+    if (TW_NAME_MAP[trimmed]) return { symbol: TW_NAME_MAP[trimmed], name: trimmed };
+    if (/^\d{4,6}[A-Z]?$/.test(trimmed)) return { symbol: trimmed + ".TW", name: null };
+    if (!hasCJK(trimmed)) return { symbol: trimmed.toUpperCase(), name: null };
+    // 含中文但不在內建對照表中，線上查詢
+    try {
+      const found = await searchSymbolByName(trimmed);
+      return found; // 可能為 null
+    } catch (e) {
+      return null;
     }
+  }
 
-    // 新增股票 (包含智慧搜尋名稱功能)
-    async function addStock() {
-        let symbolInput = document.getElementById('symbol').value.trim();
-        const priceInput = parseFloat(document.getElementById('price').value);
-        let qtyInput = parseInt(document.getElementById('quantity').value);
-        const unitInput = document.getElementById('unit').value;
+  let portfolio = [];
+  let lastFetch = null;
 
-        if (!symbolInput || isNaN(priceInput) || isNaN(qtyInput) || qtyInput <= 0) {
-            alert("請完整填寫正確的股票資訊");
-            return;
-        }
+  const el = (id) => document.getElementById(id);
+  const fmtMoney = (n, decimals = 2) => {
+    const sign = n < 0 ? "-" : "";
+    const v = Math.abs(n);
+    return sign + "$" + v.toLocaleString("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+  };
+  const fmtPct = (n) => (n >= 0 ? "+" : "") + n.toFixed(2) + "%";
+  const isTW = (symbol) => /\.(TW|TWO)$/i.test(symbol.trim());
 
-        // 轉為大寫方便後續比對
-        symbolInput = symbolInput.toUpperCase();
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      portfolio = raw ? JSON.parse(raw) : [];
+    } catch (e) { portfolio = []; }
+    const conv = localStorage.getItem(CONVENTION_KEY) || "tw";
+    document.body.setAttribute("data-convention", conv);
+  }
 
-        // 智慧搜尋邏輯：如果輸入的不是標準的美股代碼或帶有後綴的台股代碼，就啟動名稱搜尋
-        const isStandardSymbol = /^[A-Z0-9.]+$/.test(symbolInput) && (symbolInput.includes('.') || symbolInput.length <= 5);
-        
-        if (!isStandardSymbol) {
-            const loading = document.getElementById('loadingText');
-            loading.innerText = "正在搜尋股票代碼...";
-            loading.style.display = 'block';
+  function save() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(portfolio));
+  }
 
-            try {
-                const searchUrl = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(symbolInput)}&lang=zh-TW&region=TW`;
-                const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(searchUrl)}`;
-                
-                const response = await fetch(proxyUrl);
-                const data = await response.json();
-                const searchData = JSON.parse(data.contents);
+  function toast(msg) {
+    const t = el("toast");
+    t.textContent = msg;
+    t.classList.add("show");
+    clearTimeout(toast._timer);
+    toast._timer = setTimeout(() => t.classList.remove("show"), 2400);
+  }
 
-                if (searchData.quotes && searchData.quotes.length > 0) {
-                    // 取搜尋結果的第一筆
-                    const bestMatch = searchData.quotes[0];
-                    const stockName = bestMatch.shortname || bestMatch.longname || symbolInput;
-                    
-                    // 跳出確認視窗詢問使用者
-                    const confirmAdd = confirm(`系統找到最相符的股票：\n名稱：${stockName}\n代碼：${bestMatch.symbol}\n\n是否使用此股票加入投資組合？`);
-                    
-                    if (confirmAdd) {
-                        symbolInput = bestMatch.symbol;
-                    } else {
-                        loading.style.display = 'none';
-                        return; // 使用者取消，中斷流程
-                    }
-                } else {
-                    alert("找不到對應的股票名稱，請嘗試輸入精確代碼（如 2454.TW）");
-                    loading.style.display = 'none';
-                    return;
-                }
-            } catch (error) {
-                console.error("搜尋代碼失敗:", error);
-                alert("搜尋股票時發生錯誤，請直接輸入股票代碼");
-                loading.style.display = 'none';
-                return;
-            }
-            loading.style.display = 'none';
-        }
+  // ---------- 計算邏輯 ----------
+  function computeHolding(h) {
+    const shares = h.shares;
+    const tw = isTW(h.symbol);
+    const grossCost = shares * h.avgCost;
+    const buyFee = tw ? Math.max(grossCost * TW_BUY_FEE, TW_MIN_FEE) : 0;
+    const cost = grossCost + buyFee;
 
-        // 單位換算：1張 = 1000股
-        if (unitInput === 'lot') {
-            qtyInput = qtyInput * 1000;
-        }
-
-        // 判斷是否為台股 (包含 .TW 或 .TWO)
-        const isTWStock = symbolInput.includes('.TW') || symbolInput.includes('.TWO');
-
-        // 計算買入成本 (含手續費)
-        let buyFee = 0;
-        if (isTWStock) {
-            buyFee = Math.floor(priceInput * qtyInput * 0.001425); // 台股買進手續費
-        }
-        const totalCost = (priceInput * qtyInput) + buyFee;
-
-        // 建立新物件加入陣列
-        const newRecord = {
-            id: Date.now().toString(), // 唯一識別碼
-            symbol: symbolInput,
-            buyPrice: priceInput,
-            shares: qtyInput,
-            isTW: isTWStock,
-            totalCost: totalCost,
-            currentPrice: priceInput, // 預設為買入價，等更新報價後覆蓋
-        };
-
-        portfolio.push(newRecord);
-        
-        // 清空輸入框
-        document.getElementById('symbol').value = '';
-        document.getElementById('price').value = '';
-        document.getElementById('quantity').value = '';
-
-        saveAndRender();
-        refreshPrices(); // 新增後立刻抓最新價
+    let currentValue = null, pnl = null, pnlPct = null;
+    if (typeof h.price === "number") {
+      const grossValue = shares * h.price;
+      const sellFee = tw ? Math.max(grossValue * TW_SELL_FEE, TW_MIN_FEE) : 0;
+      const tax = tw ? grossValue * TW_TAX : 0;
+      currentValue = grossValue - sellFee - tax;
+      pnl = currentValue - cost;
+      pnlPct = cost !== 0 ? (pnl / cost) * 100 : 0;
     }
+    return { tw, cost, currentValue, pnl, pnlPct };
+  }
 
-    // 刪除紀錄
-    function deleteStock(id) {
-        portfolio = portfolio.filter(stock => stock.id !== id);
-        saveAndRender();
-    }
+  function renderTotals() {
+    let totalCost = 0, totalValue = 0, hasPrice = false;
+    portfolio.forEach(h => {
+      const c = computeHolding(h);
+      totalCost += c.cost;
+      if (c.currentValue !== null) { totalValue += c.currentValue; hasPrice = true; }
+    });
+    const totalPnl = totalValue - totalCost;
+    const totalPnlPct = totalCost !== 0 ? (totalPnl / totalCost) * 100 : 0;
 
-    // 更新報價 (核心 API 邏輯)
-    async function refreshPrices() {
-        const loading = document.getElementById('loadingText');
-        loading.innerText = "取得即時報價中...";
-        loading.style.display = 'block';
+    el("totalValue").textContent = hasPrice ? fmtMoney(totalValue, 0) : "—";
+    el("totalCostLine").textContent = "成本 " + fmtMoney(totalCost, 0);
+    el("totalCount").textContent = portfolio.length;
 
-        let updatedCount = 0;
-
-        for (let i = 0; i < portfolio.length; i++) {
-            let stock = portfolio[i];
-            try {
-                const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${stock.symbol}`;
-                const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(yahooUrl)}`;
-                
-                const response = await fetch(proxyUrl);
-                const data = await response.json();
-                const yahooData = JSON.parse(data.contents);
-
-                if (yahooData.chart && yahooData.chart.result && yahooData.chart.result.length > 0) {
-                    const price = yahooData.chart.result[0].meta.regularMarketPrice;
-                    portfolio[i].currentPrice = price;
-                    updatedCount++;
-                }
-            } catch (error) {
-                console.error(`獲取 ${stock.symbol} 報價失敗:`, error);
-            }
-        }
-
-        if (updatedCount > 0) {
-            saveAndRender();
-        } else {
-            console.log("未取得新報價，可能收盤或網路異常");
-        }
-        
-        loading.style.display = 'none';
-    }
-
-    // 繪製表格
-    function renderTable() {
-        const tbody = document.getElementById('tableBody');
-        tbody.innerHTML = '';
-
-        if (portfolio.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; color: var(--text-secondary);">尚無庫存紀錄，請從上方新增。</td></tr>';
-            return;
-        }
-
-        portfolio.forEach(stock => {
-            // 計算當前真實市值與稅費
-            let sellFee = 0;
-            let sellTax = 0;
-            const rawCurrentValue = stock.currentPrice * stock.shares;
-
-            if (stock.isTW) {
-                sellFee = Math.floor(rawCurrentValue * 0.001425);
-                sellTax = Math.floor(rawCurrentValue * 0.003);
-            }
-
-            const netCurrentValue = rawCurrentValue - sellFee - sellTax;
-            const profitLoss = netCurrentValue - stock.totalCost;
-            const profitLossPercent = (profitLoss / stock.totalCost) * 100;
-
-            // 決定顏色 class
-            const colorClass = profitLoss >= 0 ? 'profit' : 'loss';
-            const sign = profitLoss > 0 ? '+' : '';
-
-            // 建立表格列
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td><strong>${stock.symbol}</strong></td>
-                <td>${stock.shares} 股</td>
-                <td>${stock.buyPrice.toFixed(2)}</td>
-                <td>${stock.totalCost.toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
-                <td>${stock.currentPrice.toFixed(2)}</td>
-                <td>${netCurrentValue.toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
-                <td class="${colorClass}">${sign}${profitLoss.toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
-                <td class="${colorClass}">${sign}${profitLossPercent.toFixed(2)}%</td>
-                <td>
-                    <button class="btn-delete" onclick="deleteStock('${stock.id}')">×</button>
-                </td>
-            `;
-            tbody.appendChild(tr);
-        });
-    }
-
-    // 匯出 JSON
-    function exportJSON() {
-        if (portfolio.length === 0) {
-            alert("沒有資料可以匯出");
-            return;
-        }
-        const dataStr = JSON.stringify(portfolio, null, 2);
-        const blob = new Blob([dataStr], { type: "application/json" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `portfolio_backup_${new Date().toISOString().slice(0,10)}.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-    }
-
-    // 匯入 JSON
-    function importJSON(event) {
-        const file = event.target.files[0];
-        if (!file) return;
-
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            try {
-                const importedData = JSON.parse(e.target.result);
-                if (Array.isArray(importedData)) {
-                    portfolio = importedData;
-                    saveAndRender();
-                    refreshPrices();
-                    alert("資料匯入成功！");
-                } else {
-                    alert("檔案格式不正確");
-                }
-            } catch (err) {
-                alert("讀取檔案失敗，請確認是否為正確的 JSON 格式");
-            }
-            event.target.value = '';
-        };
-        reader.readAsText(file);
-    }
-</script>
-
-</body>
-</html>
-
+    const pnlEl = el("totalPnl");
+    const pctEl = el("totalPnlPct");
+    pnlEl.textContent = hasPrice ? fmtMoney(totalPnl, 0) : "—";
+    pctEl.textContent = hasPrice ? fmtPct(totalPnlPct) : "尚未取得報價";
+    [pnlEl, pctEl].forEach(e => e.classList.remove("pos", "neg", "flat"));
+    const cls = !hasPrice ? "flat" : (totalPnl > 0 ? "pos" : totalPnl < 0 ? "neg" : "flat");
+    pnlEl.classList.add
