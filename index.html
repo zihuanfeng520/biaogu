@@ -110,7 +110,7 @@
     margin-bottom: 14px; letter-spacing: 0.01em;
   }
   .form-grid {
-    display: grid; grid-template-columns: 1.1fr 1.3fr 1fr auto; gap: 10px; align-items: end;
+    display: grid; grid-template-columns: 1.1fr 1fr 1.2fr 0.9fr auto; gap: 10px; align-items: end;
   }
   .field label {
     display: block; font-size: 11px; color: var(--text-faint); margin-bottom: 6px; letter-spacing: 0.03em;
@@ -137,7 +137,7 @@
     border: 1px solid var(--border); color: var(--text-dim); margin-left: 8px; vertical-align: middle;
   }
 
-  @media (max-width: 700px) {
+  @media (max-width: 780px) {
     .form-grid { grid-template-columns: 1fr 1fr; }
     .form-grid .btn-primary { grid-column: 1 / -1; }
   }
@@ -262,7 +262,11 @@
     <div class="form-grid">
       <div class="field">
         <label for="inSymbol">代碼或名稱</label>
-        <input type="text" id="inSymbol" placeholder="例如 2330.TW 或 海韻電" autocomplete="off">
+        <input type="text" id="inSymbol" placeholder="如 AAPL 或 海韻電" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="inCustomName">自訂名稱 (選填)</label>
+        <input type="text" id="inCustomName" placeholder="空白自動向市場抓取" autocomplete="off">
       </div>
       <div class="field">
         <label for="inQty">數量</label>
@@ -280,11 +284,11 @@
       </div>
       <button class="btn-primary" id="btnAdd">加入</button>
     </div>
-    <div class="hint" id="marketHint">代碼含 <code>.TW</code> / <code>.TWO</code> 視為台股（買進計 0.1425% 手續費，最低 20 元；市值計算扣除 0.1425% 手續費［最低 20 元］＋0.3% 證交稅）；其餘視為美股（不計手續費與稅金）。也可直接輸入純數字代碼（如 2330）或常見中文簡稱（如台積電）。</div>
+    <div class="hint" id="marketHint">代碼含 <code>.TW</code> / <code>.TWO</code> 視為台股（買進計 0.1425% 手續費，最低 20 元；市值計算扣除 0.1425% 手續費［最低 20 元］＋0.3% 證交稅）；其餘視為美股（不計稅費）。可輸入純代碼（系統自動判別上市櫃）或名稱。</div>
   </div>
 
   <div class="list-head">
-    <div>代碼</div><div>數量</div><div>成本</div><div>現價</div><div>市值</div><div>損益</div><div></div>
+    <div>代碼</div><div>數量</div><div>成本</div><div>現價</div><div>市值(扣稅費)</div><div>損益</div><div></div>
   </div>
 
   <div id="holdingsList"></div>
@@ -323,101 +327,101 @@
   const TW_TAX = 0.003;
   const TW_MIN_FEE = 20;
 
-  // 初始內建對照表
+  // 基礎字典：只保留最常用的，未來的新股全部交給 API 自動抓取名稱
   const TW_NAME_MAP = {
     "台積電": "2330.TW", "台积电": "2330.TW",
     "鴻海": "2317.TW", "鸿海": "2317.TW",
     "聯發科": "2454.TW", "联发科": "2454.TW",
-    "台達電": "2308.TW", "台达电": "2308.TW",
-    "中華電": "2412.TW", "中华电": "2412.TW",
-    "元大台灣50": "0050.TW",
-    "元大高股息": "0056.TW",
-    "國泰永續高股息": "00878.TW",
-    "富邦台50": "006208.TW"
+    "元大台灣50": "0050.TW"
   };
 
   const TW_NAME_MAP_NORM = {};
+  const SYMBOL_TO_NAME_MAP = {}; 
   
   function normalizeName(s) {
     return (s || "").trim().replace(/臺/g, "台").replace(/\s+/g, "");
   }
 
-  // 初始化正規化對照表
-  Object.keys(TW_NAME_MAP).forEach(k => { TW_NAME_MAP_NORM[normalizeName(k)] = TW_NAME_MAP[k]; });
+  Object.keys(TW_NAME_MAP).forEach(k => { 
+    const sym = TW_NAME_MAP[k];
+    TW_NAME_MAP_NORM[normalizeName(k)] = sym;
+    TW_NAME_MAP_NORM[sym.split('.')[0]] = sym; 
+    SYMBOL_TO_NAME_MAP[sym] = k; 
+  });
 
-  // ===== 修改的核心：強化版的代理請求函數 =====
+  // 多重代理請求函數
+  const CORS_PROXIES = [
+    (u) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
+    (u) => "https://corsproxy.io/?url=" + encodeURIComponent(u),
+    (u) => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u)
+  ];
+
   async function proxyFetchJson(targetUrl) {
     let lastErr = new Error("PROXY_FAILED"); 
-    
-    // 方法一：AllOrigins (使用 /get 模式，它會把資料包裝在 contents 欄位，確保通過 CORS)
     try {
       const res = await fetch("https://api.allorigins.win/get?url=" + encodeURIComponent(targetUrl), { cache: "no-store" });
       if (res.ok) {
         const wrapper = await res.json();
-        // 如果成功抓到，解析裡面的字串為 JSON
         if (wrapper.contents) return JSON.parse(wrapper.contents);
       }
-    } catch (e) {
-      console.warn("AllOrigins 代理失敗", e);
-    }
+    } catch (e) { }
 
-    // 方法二：CorsProxy.io (備用)
     try {
       const res = await fetch("https://corsproxy.io/?url=" + encodeURIComponent(targetUrl), { cache: "no-store" });
       if (res.ok) return await res.json();
-    } catch (e) {
-      console.warn("CorsProxy 代理失敗", e);
-    }
+    } catch (e) { }
 
-    // 方法三：CodeTabs (備用)
+    try {
+      const res = await fetch("https://thingproxy.freeboard.io/fetch/" + encodeURI(targetUrl), { cache: "no-store" });
+      if (res.ok) return await res.json();
+    } catch (e) { }
+
     try {
       const res = await fetch("https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(targetUrl), { cache: "no-store" });
       if (res.ok) return await res.json();
-    } catch (e) {
-      console.warn("CodeTabs 代理失敗", e);
-    }
+    } catch (e) { }
 
-    throw lastErr; // 全部失敗才丟出例外
+    throw lastErr; 
   }
-  // ===========================================
 
-  // 背景非同步載入官方上市櫃股票清單
+  // 背景非同步載入官方清單 (輔助快速轉換代碼)
   async function loadOfficialTaiwanStocks() {
+    let hasNewData = false;
     try {
       const twseData = await proxyFetchJson("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL");
       if (Array.isArray(twseData)) {
         twseData.forEach(item => {
-          if (item.Code && item.Name) TW_NAME_MAP_NORM[normalizeName(item.Name)] = item.Code + ".TW";
+          if (item.Code && item.Name) {
+            const sym = item.Code + ".TW";
+            TW_NAME_MAP_NORM[normalizeName(item.Name)] = sym;
+            TW_NAME_MAP_NORM[item.Code] = sym; 
+            SYMBOL_TO_NAME_MAP[sym] = item.Name; 
+          }
         });
+        hasNewData = true;
       }
-    } catch (e) {
-      console.warn("載入證交所清單失敗", e);
-    }
+    } catch (e) {}
 
     try {
       const tpexData = await proxyFetchJson("https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O");
       if (Array.isArray(tpexData)) {
         tpexData.forEach(item => {
           if (item.SecuritiesCompanyCode && item.CompanyName) {
-            TW_NAME_MAP_NORM[normalizeName(item.CompanyName)] = item.SecuritiesCompanyCode + ".TWO";
+            const sym = item.SecuritiesCompanyCode + ".TWO";
+            TW_NAME_MAP_NORM[normalizeName(item.CompanyName)] = sym;
+            TW_NAME_MAP_NORM[item.SecuritiesCompanyCode] = sym; 
+            SYMBOL_TO_NAME_MAP[sym] = item.CompanyName; 
           }
         });
+        hasNewData = true;
       }
-    } catch (e) {
-      console.warn("載入櫃買中心清單失敗", e);
-    }
+    } catch (e) {}
+
+    if (hasNewData) renderAll();
   }
 
   function lookupNameMap(raw) {
     return TW_NAME_MAP_NORM[normalizeName(raw)] || null;
-  }
-
-  function resolveSymbol(raw) {
-    const trimmed = raw.trim();
-    const mapped = lookupNameMap(trimmed);
-    if (mapped) return mapped;
-    if (/^\d{4,6}[A-Z]?$/.test(trimmed)) return trimmed + ".TW"; 
-    return trimmed.toUpperCase();
   }
 
   function hasCJK(str) {
@@ -437,12 +441,24 @@
 
   async function resolveSymbolAsync(raw) {
     const trimmed = raw.trim();
+    const upper = trimmed.toUpperCase();
+
+    if (SYMBOL_TO_NAME_MAP[upper]) return { symbol: upper, name: SYMBOL_TO_NAME_MAP[upper] };
+
     const mapped = lookupNameMap(trimmed);
-    if (mapped) return { symbol: mapped, name: trimmed };
-    if (/^\d{4,6}[A-Z]?$/.test(trimmed)) return { symbol: trimmed + ".TW", name: null };
-    if (!hasCJK(trimmed)) return { symbol: trimmed.toUpperCase(), name: null };
+    if (mapped) return { symbol: mapped, name: SYMBOL_TO_NAME_MAP[mapped] };
+
+    if (/^\d{4,6}[A-Z]?$/.test(trimmed)) {
+       const sym = trimmed + ".TW";
+       return { symbol: sym, name: SYMBOL_TO_NAME_MAP[sym] || null };
+    }
+
+    if (!hasCJK(trimmed)) return { symbol: upper, name: SYMBOL_TO_NAME_MAP[upper] || null };
     
     const found = await searchSymbolByName(trimmed);
+    if (found && !found.name && SYMBOL_TO_NAME_MAP[found.symbol]) {
+        found.name = SYMBOL_TO_NAME_MAP[found.symbol];
+    }
     return found; 
   }
 
@@ -552,15 +568,18 @@
         ? lots + " 張"
         : h.shares.toLocaleString("en-US") + " 股";
 
+      let displayMeta = h.name || SYMBOL_TO_NAME_MAP[h.symbol] || "";
+      displayMeta = displayMeta ? displayMeta + " " : "";
+
       row.innerHTML = `
         <div class="h-symbol">
           <span class="code">${h.symbol}${c.tw ? '<span class="market-tag">TW</span>' : '<span class="market-tag">US</span>'}</span>
-          <span class="meta">${h.name ? h.name + " " : ""}${h.updatedAt ? "更新於 " + h.updatedAt : "尚未更新報價"}</span>
+          <span class="meta">${displayMeta}${h.updatedAt ? "更新於 " + h.updatedAt : "尚未更新報價"}</span>
         </div>
         <div class="h-cell"><span class="cell-label">數量</span>${qtyDisplay}</div>
         <div class="h-cell"><span class="cell-label">成本/股</span>${fmtMoney(h.avgCost, 2)}</div>
         <div class="h-cell"><span class="cell-label">現價</span>${priceStr}</div>
-        <div class="h-cell"><span class="cell-label">市值</span>${valueStr}</div>
+        <div class="h-cell"><span class="cell-label">市值(扣稅費)</span>${valueStr}</div>
         <div class="h-pnl">
           <span class="amt ${pnlCls}">${pnlStr}</span>
           <span class="pct ${pnlCls}">${pnlPctStr}</span>
@@ -590,6 +609,7 @@
     renderLastUpdated();
   }
 
+  // 核心改進：向市場要價格時，一併把「官方正式名稱」抓回來！
   async function fetchPrice(symbol) {
     const yahooUrl = "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(symbol) + "?interval=1d&range=1d";
     const data = await proxyFetchJson(yahooUrl);
@@ -597,7 +617,13 @@
     if (!result || !result.meta) throw new Error("no data");
     const price = result.meta.regularMarketPrice;
     if (typeof price !== "number") throw new Error("no price");
-    return price;
+    
+    // 動態擷取官方名稱 (The ultimate fix)
+    let fetchedName = null;
+    if (result.meta.shortName) fetchedName = result.meta.shortName;
+    else if (result.meta.longName) fetchedName = result.meta.longName;
+
+    return { price: price, name: fetchedName };
   }
 
   async function refreshAll() {
@@ -610,8 +636,11 @@
 
     await Promise.all(portfolio.map(async (h) => {
       try {
-        const price = await fetchPrice(h.symbol);
-        h.price = price;
+        const data = await fetchPrice(h.symbol);
+        h.price = data.price;
+        // 一勞永逸：舊紀錄如果沒名字，趁更新股價時直接把官方名字補上
+        if (!h.name && data.name) h.name = data.name; 
+        
         h.updatedAt = now.toLocaleTimeString("zh-TW", { hour12: false });
         okCount++;
       } catch (e) {
@@ -629,6 +658,7 @@
 
   async function addHolding() {
     const symbolRaw = el("inSymbol").value.trim();
+    const customName = el("inCustomName").value.trim(); 
     const qtyRaw = parseFloat(el("inQty").value);
     const unit = el("inUnit").value;
     const costRaw = parseFloat(el("inCost").value);
@@ -652,11 +682,12 @@
       }
 
       if (!resolved || !resolved.symbol) {
-        toast(`找不到「${symbolRaw}」對應的股票代碼，請確認名稱是否正確，或改用數字代碼新增`, 4500);
+        toast(`找不到對應的股票代碼，請確認名稱是否正確，或直接輸入代碼新增`, 4500);
         return;
       }
       const symbol = resolved.symbol;
-      const displayName = resolved.name;
+      
+      const displayName = customName || resolved.name || SYMBOL_TO_NAME_MAP[symbol] || null;
 
       portfolio.push({
         id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random(),
@@ -671,14 +702,21 @@
       save();
       renderAll();
       el("inSymbol").value = "";
+      el("inCustomName").value = ""; 
       el("inQty").value = "";
       el("inCost").value = "";
       el("inSymbol").focus();
       toast(displayName ? `已新增 ${symbol}（${displayName}）` : `已新增 ${symbol}`);
-      fetchPrice(symbol).then(price => {
+      
+      // 新增後立刻抓最新股價，同時帶回官方名稱！
+      fetchPrice(symbol).then(data => {
         const target = portfolio.find(h => h.symbol === symbol && h.price === null);
         if (target) {
-          target.price = price;
+          target.price = data.price;
+          // 一勞永逸：如果在剛才解析階段沒拿到名字（例如只打了 AAPL），立刻用官方名稱補上
+          if (!target.name && data.name) {
+              target.name = data.name;
+          }
           target.updatedAt = new Date().toLocaleTimeString("zh-TW", { hour12: false });
           save(); renderAll();
         }
@@ -686,9 +724,8 @@
         toast(`${symbol} 目前抓不到報價，請確認代碼是否正確（可稍後按重新整理再試一次）`);
       });
     } catch (err) {
-      console.error("addHolding failed:", err);
       if (err.message === "PROXY_FAILED") {
-          toast(`網路連線或代理伺服器失敗，無法自動搜尋「${symbolRaw}」。請直接輸入代碼`, 5000);
+          toast(`網路連線或代理伺服器失敗，請關閉廣告攔截器後再試，或直接輸入代碼`, 6000);
       } else {
           toast("新增時發生非預期錯誤，請稍後再試一次", 4500);
       }
@@ -737,6 +774,7 @@
 
   el("btnAdd").addEventListener("click", addHolding);
   el("inSymbol").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) addHolding(); });
+  el("inCustomName").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) addHolding(); });
   el("inCost").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) addHolding(); });
   el("btnRefresh").addEventListener("click", refreshAll);
   el("btnExport").addEventListener("click", exportData);
@@ -754,7 +792,7 @@
   });
   el("inSymbol").addEventListener("input", () => {
     const v = el("inSymbol").value.trim();
-    if (!v) { el("marketHint").innerHTML = '代碼含 <code>.TW</code> / <code>.TWO</code> 視為台股（買進計 0.1425% 手續費，最低 20 元；市值計算扣除 0.1425% 手續費［最低 20 元］＋0.3% 證交稅）；其餘視為美股（不計手續費與稅金）。也可直接輸入純數字代碼（如 2330）或名稱（如 海韻電）。'; return; }
+    if (!v) { el("marketHint").innerHTML = '代碼含 <code>.TW</code> / <code>.TWO</code> 視為台股（買進計 0.1425% 手續費，最低 20 元；市值計算扣除 0.1425% 手續費［最低 20 元］＋0.3% 證交稅）；其餘視為美股（不計稅費）。可輸入純代碼（系統自動判別上市櫃）或名稱。'; return; }
 
     if (hasCJK(v) && !lookupNameMap(v)) {
       el("marketHint").innerHTML = `系統將自動尋找 <strong>${v}</strong> 對應的代碼（台股買進計 0.1425% 手續費［最低 20 元］；市值扣除 0.1425% 手續費［最低 20 元］＋0.3% 證交稅）。`;
@@ -768,7 +806,7 @@
       : `偵測為 <strong>美股</strong>${resolvedNote}：不計手續費與稅金。`;
   });
 
-  // 初始化執行順序：讀取紀錄 -> 渲染 -> 更新報價 -> 背景載入官方 API
+  // 初始化執行順序
   load();
   renderAll();
   if (portfolio.length > 0) refreshAll();
