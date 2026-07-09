@@ -233,7 +233,18 @@
   }
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
-  .last-updated { text-align: center; font-size: 11.5px; color: var(--text-faint); margin-top: 16px; font-family: var(--mono); }
+  .last-updated { 
+    text-align: center; 
+    font-size: 12px; 
+    color: var(--text-faint); 
+    margin-top: 16px; 
+    font-family: var(--body); 
+  }
+  .last-updated span.hl {
+    color: var(--text-dim);
+    font-family: var(--mono);
+    font-weight: 500;
+  }
 </style>
 </head>
 <body data-convention="tw">
@@ -345,7 +356,6 @@
   const TW_TAX = 0.003;
   const TW_MIN_FEE = 20;
 
-  // 基礎字典：如果外部檔案沒載入，這幾檔還是認得出來
   const TW_NAME_MAP = {
     "台積電": "2330.TW", "台积电": "2330.TW",
     "鴻海": "2317.TW", "鸿海": "2317.TW",
@@ -360,7 +370,6 @@
     return (s || "").trim().replace(/臺/g, "台").replace(/\s+/g, "");
   }
 
-  // 寫入基礎字典
   Object.keys(TW_NAME_MAP).forEach(k => { 
     const sym = TW_NAME_MAP[k];
     TW_NAME_MAP_NORM[normalizeName(k)] = sym;
@@ -374,7 +383,6 @@
   async function loadOfficialTaiwanStocks() {
     let hasNewData = false;
     
-    // 讀取上市股票 (請確保 STOCK_DAY_ALL.json 已上傳到 GitHub)
     try {
       const twseRes = await fetch("./STOCK_DAY_ALL.json");
       if (twseRes.ok) {
@@ -395,7 +403,6 @@
       console.warn("載入上市字典失敗：請確認 STOCK_DAY_ALL.json 已放上 GitHub");
     }
 
-    // 讀取上櫃股票 (請確保 mopsfin_t187ap03_O.json 已上傳到 GitHub)
     try {
       const tpexRes = await fetch("./mopsfin_t187ap03_O.json");
       if (tpexRes.ok) {
@@ -468,8 +475,6 @@
     throw lastErr; 
   }
 
-  // =========================================================================
-
   function lookupNameMap(raw) {
     return TW_NAME_MAP_NORM[normalizeName(raw)] || null;
   }
@@ -513,7 +518,11 @@
   }
 
   let portfolio = [];
-  let lastFetch = null;
+  
+  // 升級：全域狀態追蹤
+  let lastFetchTime = null;
+  let lastFetchOk = 0;
+  let lastFetchFail = 0;
 
   const el = (id) => document.getElementById(id);
   const fmtMoney = (n, decimals = 2) => {
@@ -649,8 +658,21 @@
     });
   }
 
+  // 升級：顯示完整的更新狀態報告
   function renderLastUpdated() {
-    el("lastUpdated").textContent = lastFetch ? ("報價最後更新：" + lastFetch) : "";
+    if (!lastFetchTime) {
+      el("lastUpdated").textContent = "";
+      return;
+    }
+    
+    let msg = `報價最後更新：<span class="hl">${lastFetchTime}</span>`;
+    msg += ` (成功 ${lastFetchOk} 檔`;
+    if (lastFetchFail > 0) {
+      msg += `，失敗 <span style="color:var(--down)">${lastFetchFail}</span> 檔`;
+    }
+    msg += `)`;
+    
+    el("lastUpdated").innerHTML = msg;
   }
 
   function renderAll() {
@@ -698,8 +720,14 @@
       }
     }));
 
+    // 【修改重點】如果有嘗試更新，就記錄結果狀態
+    if (okCount > 0 || failCount > 0) {
+       lastFetchTime = stamp;
+       lastFetchOk = okCount;
+       lastFetchFail = failCount;
+    }
+
     save();
-    lastFetch = stamp;
     
     btn.classList.remove("spinning");
     el("holdingsList").classList.remove("pulse-loading");
@@ -771,6 +799,14 @@
               target.name = data.name;
           }
           target.updatedAt = new Date().toLocaleTimeString("zh-TW", { hour12: false });
+          
+          // 若為系統中唯一一筆，順便更新全域時間
+          if (portfolio.length === 1) {
+             lastFetchTime = new Date().toLocaleString("zh-TW", { hour12: false });
+             lastFetchOk = 1;
+             lastFetchFail = 0;
+          }
+
           save(); renderAll();
         }
       }).catch(() => {
